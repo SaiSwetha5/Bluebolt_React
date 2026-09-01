@@ -21,6 +21,8 @@ import AssetDetail from './pages/inventory/AssetDetail';
 import CatalogList from './pages/catalog/CatalogList';
 import CatalogDetail from './pages/catalog/CatalogDetail';
 import AuditLog from './pages/audit/AuditLog';
+import CustomerHierarchy from './pages/inventory/CustomerHierarchy';
+import CustomerEntityScreen from './pages/inventory/CustomerEntityScreen';
 
 export default function App() {
   return (
@@ -60,6 +62,20 @@ export default function App() {
             {/* Catalog */}
             <Route path="catalog" element={<CatalogList />} />
             <Route path="catalog/:id" element={<CatalogDetail />} />
+            <Route
+
+path="customer-entity"
+
+element={<CustomerHierarchy />}
+
+/> 
+            <Route
+
+path="customer"
+
+element={<CustomerEntityScreen />}
+
+/> 
 
             {/* Audit */}
             <Route path="audit" element={<AuditLog />} />

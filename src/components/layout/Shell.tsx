@@ -26,6 +26,11 @@ const navGroups: NavGroup[] = [
   { title: 'Asset Management', items: [
     { label: 'Inventory / CMDB', icon: '🖥', link: '/inventory' },
     { label: 'Catalog Management', icon: '📘', link: '/catalog' },
+    
+    { label: 'Customer Entity', icon: '\uD83D\uDCD8', link: '/customer-entity' },
+    
+   
+         { label: 'Cost Management', icon: '\uD83D\uDCD8', link: '/customer' },
   ]},
   { title: 'Governance', items: [
     { label: 'Audit Log', icon: '🔎', link: '/audit' },
@@ -34,16 +39,16 @@ const navGroups: NavGroup[] = [
 
 export default function Shell() {
   return (
-    <div className="min-h-screen flex bg-slate-50">
-      <aside className="no-print w-64 shrink-0 bg-slate-925 text-slate-200 flex flex-col" style={{ backgroundColor: '#0f172a' }}>
-        <div className="flex items-center gap-2 px-5 h-16 border-b border-white/10">
-          <div className="h-8 w-8 rounded-lg bg-brand-500 flex items-center justify-center font-bold text-white text-sm">A3</div>
+    <div className="flex min-h-screen bg-slate-50">
+      <aside className="flex flex-col w-64 no-print shrink-0 bg-slate-925 text-slate-200" style={{ backgroundColor: '#0f172a' }}>
+        <div className="flex items-center h-16 gap-2 px-5 border-b border-white/10">
+          <div className="flex items-center justify-center w-8 h-8 text-sm font-bold text-white rounded-lg bg-brand-500">A3</div>
           <div>
-            <p className="font-bold text-white text-sm leading-tight">Asset360</p>
+            <p className="text-sm font-bold leading-tight text-white">Asset360</p>
             <p className="text-[11px] text-slate-400 leading-tight">PO-to-Lease Fulfillment</p>
           </div>
         </div>
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-5">
+        <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
           {navGroups.map(group => (
             <div key={group.title}>
               <p className="px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">{group.title}</p>
@@ -64,18 +69,18 @@ export default function Shell() {
         </div>
       </aside>
 
-      <div className="flex-1 min-w-0 flex flex-col">
-        <header className="no-print h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6">
+      <div className="flex flex-col flex-1 min-w-0">
+        <header className="flex items-center justify-between h-16 px-6 bg-white border-b no-print border-slate-200">
           <div>
             <p className="text-sm text-slate-400">Cognizant · Asset360</p>
             <h1 className="text-base font-semibold text-slate-800">Client Device Lifecycle Management</h1>
           </div>
           <div className="flex items-center gap-3">
             <ProcurementInbox />
-            <div className="h-9 w-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-sm font-semibold">AS</div>
+            <div className="flex items-center justify-center text-sm font-semibold rounded-full h-9 w-9 bg-brand-100 text-brand-700">AS</div>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 p-6 overflow-y-auto">
           <Outlet />
         </main>
       </div>

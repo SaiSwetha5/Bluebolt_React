@@ -8,17 +8,31 @@ import { PROCUREMENT_MAILBOX } from '../types/models';
 
 function pad(n: number, len = 5): string { return n.toString().padStart(len, '0'); }
 
+
 export interface DataContextValue {
-  purchaseOrders: PurchaseOrder[]; purchaseRequisitions: PurchaseRequisition[];
-  vendorOrders: VendorOrder[]; goodsReceipts: GoodsReceipt[];
-  invoices: VendorInvoice[]; leaseSchedules: LeaseSchedule[];
-  assets: AssetRecord[]; auditLog: AuditLogEntry[]; catalog: CatalogItem[];
+  purchaseOrders: PurchaseOrder[];
+  purchaseRequisitions: PurchaseRequisition[];
+  vendorOrders: VendorOrder[];
+  goodsReceipts: GoodsReceipt[];
+  invoices: VendorInvoice[];
+  leaseSchedules: LeaseSchedule[];
+  assets: AssetRecord[];
+  auditLog: AuditLogEntry[];
+  catalog: CatalogItem[];
   notifications: PrNotification[];
   dashboardStats: {
-    totalPOs: number; pendingApproval: number; approved: number;
-    inProcurement: number; inTransit: number; delivered: number;
-    invoiceExceptions: number; totalAssets: number; deployedAssets: number;
-    totalDevicesRequested: number; pendingPrApprovals: number; unreadNotifications: number;
+    totalPOs: number;
+    pendingApproval: number;
+    approved: number;
+    inProcurement: number;
+    inTransit: number;
+    delivered: number;
+    invoiceExceptions: number;
+    totalAssets: number;
+    deployedAssets: number;
+    totalDevicesRequested: number;
+    pendingPrApprovals: number;
+    unreadNotifications: number;
   };
   auditFor: (id: string) => AuditLogEntry[];
   markNotificationRead: (id: string) => void;
@@ -48,6 +62,8 @@ export interface DataContextValue {
   assignAsset: (assetId: string, user: string, location: string) => void;
   retireAsset: (assetId: string) => void;
   upsertCatalogItem: (item: CatalogItem, isNew: boolean) => void;
+ 
+
 }
 
 const DataContext = createContext<DataContextValue | null>(null);

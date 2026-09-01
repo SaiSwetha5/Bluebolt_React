@@ -137,21 +137,21 @@ export default function PoImport() {
     <div className="max-w-3xl space-y-4">
       <div>
         <Link to="/po" className="text-sm text-slate-500 hover:text-brand-600">← Back to Customer POs</Link>
-        <h1 className="text-lg font-bold text-slate-800 mt-1">New Customer PO Intake</h1>
+        <h1 className="mt-1 text-lg font-bold text-slate-800">Customer PO Intake</h1>
         <p className="text-sm text-slate-500">Receive a purchase order directly via integration or import a PDF copy.</p>
       </div>
 
-      <div className="a360-card p-1 flex gap-1 w-fit">
+      <div className="flex gap-1 p-1 a360-card w-fit">
         {(['API','PDF_IMPORT'] as PoSource[]).map(s => (
           <button key={s} onClick={() => setSource(s)}
             className={`px-4 py-2 rounded-lg text-sm font-semibold ${source === s ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-            {s === 'API' ? 'Client API Integration' : 'PDF Import'}
+            {s === 'API' ? 'Create Customer PO' : 'PDF Import'}
           </button>
         ))}
       </div>
 
       {source === 'PDF_IMPORT' && (
-        <div className="a360-card p-5 space-y-4">
+        <div className="p-5 space-y-4 a360-card">
           <h2 className="text-sm font-semibold text-slate-800">Upload PO PDF</h2>
           <p className="text-xs text-slate-500">Upload the customer's PDF purchase order. Asset360 will extract the PO details automatically.</p>
           <div>
@@ -161,7 +161,7 @@ export default function PoImport() {
                 <span>{isExtracting ? 'Extracting Data...' : 'Upload PDF'}</span>
                 <input ref={fileRef} type="file" accept="application/pdf" className="hidden" disabled={isExtracting} onChange={onFile} />
               </label>
-              {fileName ? <span className="text-sm text-slate-600"><span className="text-emerald-600 font-medium">✓</span> {fileName}</span>
+              {fileName ? <span className="text-sm text-slate-600"><span className="font-medium text-emerald-600">✓</span> {fileName}</span>
                 : <span className="text-sm text-slate-400">No file chosen</span>}
             </div>
           </div>
@@ -174,14 +174,14 @@ export default function PoImport() {
           )}
 
           {extractedData && pdfStep === 'review' && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-xs space-y-2">
-              <p className="font-semibold text-emerald-800 uppercase tracking-wide">Extracted PO Details</p>
+            <div className="p-4 space-y-2 text-xs border rounded-lg border-emerald-200 bg-emerald-50">
+              <p className="font-semibold tracking-wide uppercase text-emerald-800">Extracted PO Details</p>
               <div className="grid grid-cols-2 gap-3 text-slate-700">
-                <div><p className="text-slate-500 font-medium">Client Name:</p><p className="font-semibold">{extractedData.clientName || 'N/A'}</p></div>
-                <div><p className="text-slate-500 font-medium">PO Number:</p><p className="font-semibold">{extractedData.poNumber || 'N/A'}</p></div>
-                <div><p className="text-slate-500 font-medium">Catalog Item:</p><p className="font-semibold">{extractedData.catalogItem || 'N/A'}</p></div>
-                <div><p className="text-slate-500 font-medium">Quantity:</p><p className="font-semibold">{extractedData.quantity}</p></div>
-                {extractedData.notes && <div className="col-span-2"><p className="text-slate-500 font-medium">Notes:</p><p>{extractedData.notes}</p></div>}
+                <div><p className="font-medium text-slate-500">Client Name:</p><p className="font-semibold">{extractedData.clientName || 'N/A'}</p></div>
+                <div><p className="font-medium text-slate-500">PO Number:</p><p className="font-semibold">{extractedData.poNumber || 'N/A'}</p></div>
+                <div><p className="font-medium text-slate-500">Catalog Item:</p><p className="font-semibold">{extractedData.catalogItem || 'N/A'}</p></div>
+                <div><p className="font-medium text-slate-500">Quantity:</p><p className="font-semibold">{extractedData.quantity}</p></div>
+                {extractedData.notes && <div className="col-span-2"><p className="font-medium text-slate-500">Notes:</p><p>{extractedData.notes}</p></div>}
               </div>
             </div>
           )}
@@ -196,7 +196,7 @@ export default function PoImport() {
       )}
 
       {source === 'API' && (
-        <div className="a360-card p-5 space-y-4">
+        <div className="p-5 space-y-4 a360-card">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="a360-label">Client Name</label>
@@ -228,13 +228,13 @@ export default function PoImport() {
           </div>
 
           {selectedItem && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs space-y-2">
-              <p className="font-semibold text-brand-600 uppercase tracking-wide">{selectedItem.modelCategory}</p>
+            <div className="p-4 space-y-2 text-xs border rounded-lg border-slate-200 bg-slate-50">
+              <p className="font-semibold tracking-wide uppercase text-brand-600">{selectedItem.modelCategory}</p>
               <div className="grid grid-cols-2 gap-3">
-                <div><p className="text-slate-400">Current gen config</p><p className="text-slate-700 font-medium">{selectedItem.currentGenConfigDetails}</p></div>
-                <div><p className="text-slate-400">New gen model</p><p className="text-slate-700 font-medium">{selectedItem.newGenModel} <span className="text-emerald-600">({selectedItem.newGenSku})</span></p></div>
-                <div><p className="text-slate-400">Unit cost</p><p className="text-slate-700 font-medium">USD {selectedCost.toLocaleString()}</p></div>
-                <div><p className="text-slate-400">EOL timeline</p><p className="text-amber-600 font-medium">{selectedItem.eolTimeline}</p></div>
+                <div><p className="text-slate-400">Current gen config</p><p className="font-medium text-slate-700">{selectedItem.currentGenConfigDetails}</p></div>
+                <div><p className="text-slate-400">New gen model</p><p className="font-medium text-slate-700">{selectedItem.newGenModel} <span className="text-emerald-600">({selectedItem.newGenSku})</span></p></div>
+                <div><p className="text-slate-400">Unit cost</p><p className="font-medium text-slate-700">USD {selectedCost.toLocaleString()}</p></div>
+                <div><p className="text-slate-400">EOL timeline</p><p className="font-medium text-amber-600">{selectedItem.eolTimeline}</p></div>
               </div>
             </div>
           )}
