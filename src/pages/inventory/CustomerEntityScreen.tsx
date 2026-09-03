@@ -6,38 +6,17 @@ const locationData = {
     timezone: "Asia/Kolkata",
     states: {
       Karnataka: [
-        {
-          office: "Manyata Tech Park",
-          address: "Manyata Tech Park, Bengaluru",
-        },
-        {
-          office: "Electronic City",
-          address: "Electronic City, Bengaluru",
-        },
-        {
-          office: "Whitefield ITPL",
-          address: "Whitefield, Bengaluru",
-        },
+        { office: "Manyata Tech Park", address: "Manyata Tech Park, Bengaluru", pincode: "560045" },
+        { office: "Electronic City", address: "Electronic City, Bengaluru", pincode: "560100" },
+        { office: "Whitefield ITPL", address: "Whitefield, Bengaluru", pincode: "560066" },
       ],
       Telangana: [
-        {
-          office: "Hitech City",
-          address: "Hitech City, Hyderabad",
-        },
-        {
-          office: "Gachibowli",
-          address: "Gachibowli, Hyderabad",
-        },
+        { office: "Hitech City", address: "Hitech City, Hyderabad", pincode: "500081" },
+        { office: "Gachibowli", address: "Gachibowli, Hyderabad", pincode: "500032" },
       ],
       "Tamil Nadu": [
-        {
-          office: "MEPZ",
-          address: "MEPZ, Chennai",
-        },
-        {
-          office: "OMR",
-          address: "OMR, Chennai",
-        },
+        { office: "MEPZ", address: "MEPZ, Chennai", pincode: "600045" },
+        { office: "OMR", address: "OMR, Chennai", pincode: "600096" },
       ],
     },
   },
@@ -47,39 +26,57 @@ const locationData = {
     timezone: "America/New_York",
     states: {
       California: [
-        {
-          office: "San Francisco Office",
-          address: "San Francisco, California",
-        },
-        {
-          office: "Los Angeles Office",
-          address: "Los Angeles, California",
-        },
+        { office: "San Francisco Office", address: "San Francisco, California", pincode: "94105" },
+        { office: "Los Angeles Office", address: "Los Angeles, California", pincode: "90001" },
       ],
       Texas: [
-        {
-          office: "Dallas Office",
-          address: "Dallas, Texas",
-        },
-        {
-          office: "Austin Office",
-          address: "Austin, Texas",
-        },
+        { office: "Dallas Office", address: "Dallas, Texas", pincode: "75201" },
+        { office: "Austin Office", address: "Austin, Texas", pincode: "73301" },
       ],
       "New York": [
-        {
-          office: "New York City Office",
-          address: "New York City",
-        },
+        { office: "New York City Office", address: "New York City", pincode: "10001" },
       ],
     },
   },
 };
 
+/**
+ * Reusable searchable input.
+ * - Lets the user pick from a list of suggestions (typeahead via <datalist>)
+ * - Also lets the user type a completely new/manual value that isn't in the list
+ * - Fires onChange with whatever the user typed or picked
+ */
+function SearchableInput({ id, label, value, onChange, options, disabled, placeholder }) {
+  return (
+    <div>
+      <label className="block mb-1 text-sm text-gray-500">{label}</label>
+      <input
+        list={`${id}-options`}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder || `Search or type ${label}`}
+        className="w-full p-2 border rounded disabled:bg-gray-100"
+        autoComplete="off"
+      />
+      <datalist id={`${id}-options`}>
+        {options.map((opt) => (
+          <option key={opt} value={opt} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
 export default function CustomerEntityManagement() {
   const [country, setCountry] = useState("");
   const [state, setState] = useState("");
   const [office, setOffice] = useState("");
+  const [currency, setCurrency] = useState("");
+  const [timezone, setTimezone] = useState("");
+  const [address1, setAddress1] = useState("");
+  const [address2, setAddress2] = useState("");
+  const [pincode, setPincode] = useState("");
 
   const [childEntities, setChildEntities] = useState([]);
 
@@ -88,25 +85,82 @@ export default function CustomerEntityManagement() {
     organizationName: "Cognizant Technologies",
   };
 
-  const countries = Object.keys(locationData);
+  const countryOptions = Object.keys(locationData);
 
-  const states = useMemo(() => {
-    if (!country) return [];
+  const stateOptions = useMemo(() => {
+    if (!country || !locationData[country]) return [];
     return Object.keys(locationData[country].states);
   }, [country]);
 
-  const offices = useMemo(() => {
+  const officeList = useMemo(() => {
     if (!country || !state) return [];
+    if (!locationData[country] || !locationData[country].states[state]) return [];
     return locationData[country].states[state];
   }, [country, state]);
 
-  const selectedOffice = useMemo(() => {
-    return offices.find((item) => item.office === office);
-  }, [office, offices]);
+  const officeOptions = useMemo(() => officeList.map((o) => o.office), [officeList]);
+
+  const matchedOffice = useMemo(
+    () => officeList.find((item) => item.office === office),
+    [office, officeList]
+  );
+
+  // Whenever country changes, auto-fill currency/timezone if it's a known country.
+  // If the user typed a brand-new country manually, leave currency/timezone editable & blank.
+  const handleCountryChange = (val) => {
+    setCountry(val);
+    setState("");
+    setOffice("");
+    setAddress1("");
+    setAddress2("");
+    setPincode("");
+    if (locationData[val]) {
+      setCurrency(locationData[val].currency);
+      setTimezone(locationData[val].timezone);
+    } else {
+      setCurrency("");
+      setTimezone("");
+    }
+  };
+
+  const handleStateChange = (val) => {
+    setState(val);
+    setOffice("");
+    setAddress1("");
+    setAddress2("");
+    setPincode("");
+  };
+
+  // Whenever office changes and it matches a known office, auto-fill address/pincode.
+  // If manually typed, leave address/pincode editable for manual entry.
+  const handleOfficeChange = (val) => {
+    setOffice(val);
+    const found = officeList.find((item) => item.office === val);
+    if (found) {
+      setAddress1(found.address);
+      setAddress2("");
+      setPincode(found.pincode);
+    } else {
+      setAddress1("");
+      setAddress2("");
+      setPincode("");
+    }
+  };
+
+  const resetForm = () => {
+    setCountry("");
+    setState("");
+    setOffice("");
+    setCurrency("");
+    setTimezone("");
+    setAddress1("");
+    setAddress2("");
+    setPincode("");
+  };
 
   const addChildEntity = () => {
     if (!country || !state || !office) {
-      alert("Please select Country, State and Office");
+      alert("Please select/enter Country, State and Office");
       return;
     }
 
@@ -127,22 +181,19 @@ export default function CustomerEntityManagement() {
       country,
       state,
       office,
-      address: selectedOffice.address,
-      currency: locationData[country].currency,
-      timezone: locationData[country].timezone,
+      currency,
+      timezone,
+      address1,
+      address2,
+      pincode,
     };
 
     setChildEntities((prev) => [...prev, newRow]);
-
-    setCountry("");
-    setState("");
-    setOffice("");
+    resetForm();
   };
 
   const deleteChildEntity = (id) => {
-    setChildEntities((prev) =>
-      prev.filter((item) => item.id !== id)
-    );
+    setChildEntities((prev) => prev.filter((item) => item.id !== id));
   };
 
   const saveAll = () => {
@@ -160,166 +211,108 @@ export default function CustomerEntityManagement() {
   return (
     <div className="min-h-screen p-8 bg-slate-100">
       <div className="mx-auto max-w-7xl">
-
         {/* Parent Entity */}
-
         <div className="p-6 mb-6 bg-white shadow rounded-xl">
-          <h2 className="mb-4 text-xl font-bold text-slate-800">
-            Parent Entity
-          </h2>
+          <h2 className="mb-4 text-xl font-bold text-slate-800">Parent Entity</h2>
 
           <div className="grid grid-cols-2 gap-4">
-
             <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                Customer Entity Name
-              </label>
-              <input
-                value={parentEntity.customerEntityName}
-                readOnly
-                className="w-full p-2 border rounded"
-              />
+              <label className="block mb-1 text-sm text-gray-500">Customer Entity Name</label>
+              <input value={parentEntity.customerEntityName} readOnly className="w-full p-2 border rounded" />
             </div>
 
             <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                Organization Name
-              </label>
-              <input
-                value={parentEntity.organizationName}
-                readOnly
-                className="w-full p-2 border rounded"
-              />
+              <label className="block mb-1 text-sm text-gray-500">Organization Name</label>
+              <input value={parentEntity.organizationName} readOnly className="w-full p-2 border rounded" />
             </div>
-
           </div>
         </div>
 
         {/* Add Child Entity */}
-
         <div className="p-6 mb-6 bg-white shadow rounded-xl">
-          <h2 className="mb-4 text-xl font-bold text-slate-800">
-            Add Child Entity
-          </h2>
+          <h2 className="mb-4 text-xl font-bold text-slate-800">Add Child Entity</h2>
+          <p className="mb-4 text-xs text-gray-400">
+            Search &amp; select from the list, or simply type a new value manually in any field.
+          </p>
 
           <div className="grid grid-cols-3 gap-4">
+            <SearchableInput
+              id="country"
+              label="Country"
+              value={country}
+              onChange={handleCountryChange}
+              options={countryOptions}
+            />
+
+            <SearchableInput
+              id="state"
+              label="State"
+              value={state}
+              onChange={handleStateChange}
+              options={stateOptions}
+              disabled={!country}
+            />
+
+            <SearchableInput
+              id="office"
+              label="Office"
+              value={office}
+              onChange={handleOfficeChange}
+              options={officeOptions}
+              disabled={!country || !state}
+            />
 
             <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                Country
-              </label>
-
-              <select
-                value={country}
-                onChange={(e) => {
-                  setCountry(e.target.value);
-                  setState("");
-                  setOffice("");
-                }}
-                className="w-full p-2 border rounded"
-              >
-                <option value="">Select Country</option>
-
-                {countries.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                State
-              </label>
-
-              <select
-                value={state}
-                disabled={!country}
-                onChange={(e) => {
-                  setState(e.target.value);
-                  setOffice("");
-                }}
-                className="w-full p-2 border rounded"
-              >
-                <option value="">Select State</option>
-
-                {states.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                Office
-              </label>
-
-              <select
-                value={office}
-                disabled={!state}
-                onChange={(e) => setOffice(e.target.value)}
-                className="w-full p-2 border rounded"
-              >
-                <option value="">Select Office</option>
-
-                {offices.map((item) => (
-                  <option
-                    key={item.office}
-                    value={item.office}
-                  >
-                    {item.office}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                Currency
-              </label>
-
+              <label className="block mb-1 text-sm text-gray-500">Currency</label>
               <input
-                readOnly
-                value={
-                  country
-                    ? locationData[country].currency
-                    : ""
-                }
-                className="w-full p-2 border rounded bg-gray-50"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                placeholder="Enter Currency"
+                className="w-full p-2 border rounded"
               />
             </div>
 
             <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                Time Zone
-              </label>
-
+              <label className="block mb-1 text-sm text-gray-500">Time Zone</label>
               <input
-                readOnly
-                value={
-                  country
-                    ? locationData[country].timezone
-                    : ""
-                }
-                className="w-full p-2 border rounded bg-gray-50"
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                placeholder="Enter Time Zone"
+                className="w-full p-2 border rounded"
+              />
+            </div>
+
+     
+
+            <div>
+              <label className="block mb-1 text-sm text-gray-500">Address 1</label>
+              <input
+                value={address1}
+                onChange={(e) => setAddress1(e.target.value)}
+                className="w-full p-2 border rounded"
+                placeholder="Enter Address 1"
               />
             </div>
 
             <div>
-              <label className="block mb-1 text-sm text-gray-500">
-                Address
-              </label>
-
+              <label className="block mb-1 text-sm text-gray-500">Address 2</label>
               <input
-                readOnly
-                value={selectedOffice?.address || ""}
-                className="w-full p-2 border rounded bg-gray-50"
+                value={address2}
+                onChange={(e) => setAddress2(e.target.value)}
+                className="w-full p-2 border rounded"
+                placeholder="Enter Address 2"
               />
             </div>
 
+                   <div>
+              <label className="block mb-1 text-sm text-gray-500">Pincode</label>
+              <input
+                value={pincode}
+                onChange={(e) => setPincode(e.target.value)}
+                placeholder="Enter Pincode"
+                className="w-full p-2 border rounded"
+              />
+            </div>
           </div>
 
           <div className="mt-5">
@@ -333,13 +326,9 @@ export default function CustomerEntityManagement() {
         </div>
 
         {/* Mapping Table */}
-
         <div className="p-6 bg-white shadow rounded-xl">
-
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-slate-800">
-              Parent - Child Entity Mapping
-            </h2>
+            <h2 className="text-xl font-bold text-slate-800">Parent - Child Entity Mapping</h2>
 
             <button
               onClick={saveAll}
@@ -350,88 +339,44 @@ export default function CustomerEntityManagement() {
           </div>
 
           <div className="overflow-x-auto">
-
             <table className="w-full border border-gray-200">
               <thead>
                 <tr className="text-white bg-slate-800">
-                  <th className="p-3 border">
-                    Parent Entity
-                  </th>
-                  <th className="p-3 border">
-                    Country
-                  </th>
-                  <th className="p-3 border">
-                    State
-                  </th>
-                  <th className="p-3 border">
-                    Office
-                  </th>
-                  <th className="p-3 border">
-                    Currency
-                  </th>
-                  <th className="p-3 border">
-                    Timezone
-                  </th>
-                  <th className="p-3 border">
-                    Address
-                  </th>
-                  <th className="p-3 border">
-                    Action
-                  </th>
+                  <th className="p-3 border">Parent Entity</th>
+                  <th className="p-3 border">Country</th>
+                  <th className="p-3 border">State</th>
+                  <th className="p-3 border">Office</th>
+                  <th className="p-3 border">Currency</th>
+                  <th className="p-3 border">Timezone</th>
+                  <th className="p-3 border">Pincode</th>
+                  <th className="p-3 border">Address 1</th>
+                  <th className="p-3 border">Address 2</th>
+                  <th className="p-3 border">Action</th>
                 </tr>
               </thead>
 
               <tbody>
                 {childEntities.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={8}
-                      className="p-5 text-center text-gray-500"
-                    >
+                    <td colSpan={10} className="p-5 text-center text-gray-500">
                       No Child Entities Added
                     </td>
                   </tr>
                 ) : (
                   childEntities.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="hover:bg-slate-50"
-                    >
-                      <td className="p-3 border">
-                        {
-                          parentEntity.customerEntityName
-                        }
-                      </td>
-
-                      <td className="p-3 border">
-                        {row.country}
-                      </td>
-
-                      <td className="p-3 border">
-                        {row.state}
-                      </td>
-
-                      <td className="p-3 border">
-                        {row.office}
-                      </td>
-
-                      <td className="p-3 border">
-                        {row.currency}
-                      </td>
-
-                      <td className="p-3 border">
-                        {row.timezone}
-                      </td>
-
-                      <td className="p-3 border">
-                        {row.address}
-                      </td>
-
+                    <tr key={row.id} className="hover:bg-slate-50">
+                      <td className="p-3 border">{parentEntity.customerEntityName}</td>
+                      <td className="p-3 border">{row.country}</td>
+                      <td className="p-3 border">{row.state}</td>
+                      <td className="p-3 border">{row.office}</td>
+                      <td className="p-3 border">{row.currency}</td>
+                      <td className="p-3 border">{row.timezone}</td>
+                      <td className="p-3 border">{row.pincode}</td>
+                      <td className="p-3 border">{row.address1}</td>
+                      <td className="p-3 border">{row.address2}</td>
                       <td className="p-3 text-center border">
                         <button
-                          onClick={() =>
-                            deleteChildEntity(row.id)
-                          }
+                          onClick={() => deleteChildEntity(row.id)}
                           className="px-3 py-1 text-white bg-red-500 rounded hover:bg-red-600"
                         >
                           Delete
@@ -442,9 +387,7 @@ export default function CustomerEntityManagement() {
                 )}
               </tbody>
             </table>
-
           </div>
-
         </div>
       </div>
     </div>

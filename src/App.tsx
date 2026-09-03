@@ -23,6 +23,7 @@ import CatalogDetail from './pages/catalog/CatalogDetail';
 import AuditLog from './pages/audit/AuditLog';
 import CustomerHierarchy from './pages/inventory/CustomerHierarchy';
 import CustomerEntityScreen from './pages/inventory/CustomerEntityScreen';
+import CustomerPOIntake from './pages/po/CustomerPOImport';
 
 export default function App() {
   return (
@@ -37,6 +38,8 @@ export default function App() {
             <Route path="po" element={<PoList />} />
             <Route path="po/import" element={<PoImport />} />
             <Route path="po/:id" element={<PoDetail />} />
+             <Route path="po/customImport" element={<CustomerPOIntake />} />
+               
 
             {/* Procurement */}
             <Route path="procurement/requisitions" element={<PrList />} />
@@ -77,6 +80,8 @@ element={<CustomerEntityScreen />}
 
 /> 
 
+
+       
             {/* Audit */}
             <Route path="audit" element={<AuditLog />} />
 

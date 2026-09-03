@@ -9,6 +9,9 @@ const navGroups: NavGroup[] = [
   { title: 'Asset Requests', items: [
     { label: 'Customer POs', icon: '📄', link: '/po' },
     { label: 'PO Import', icon: '⬇', link: '/po/import' },
+    { label: 'PO Custom Import', icon: '⬇', link: '/po/customImport' },
+
+    
     { label: 'Purchase Requisitions', icon: '📋', link: '/procurement/requisitions' },
     { label: 'Procurement', icon: '➕', link: '/procurement/orders/new' },
     { label: 'Vendor Requests', icon: '🛒', link: '/procurement/orders' },
