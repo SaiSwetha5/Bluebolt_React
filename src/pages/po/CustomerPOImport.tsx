@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useData } from '../../store/DataContext';
 
 // Dynamically load PDF.js via CDN to avoid Vite/bundler worker issues
 const getPdfJs = (): Promise<any> => {
@@ -16,6 +18,9 @@ const getPdfJs = (): Promise<any> => {
 };
 
 export default function CustomerPOIntake() {
+  const navigate = useNavigate();
+  const { intakePO, catalog } = useData();
+
   const catalogOptions = [
     'FN4FC',
     'HP EliteBook 8 G1i 14 AI',
@@ -52,7 +57,7 @@ export default function CustomerPOIntake() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
-  const [submittedPO, setSubmittedPO] = useState<any>(null);
+  const [pdfFileName, setPdfFileName] = useState('');
 
   // State for additional files
   const [additionalFiles, setAdditionalFiles] = useState<File[]>([]);
@@ -137,9 +142,11 @@ export default function CustomerPOIntake() {
     if (!file) {
       setForm(emptyForm);
       setStatusMsg('');
+      setPdfFileName('');
       return;
     }
 
+    setPdfFileName(file.name);
     setLoading(true);
     setStatusMsg('Reading PDF document...');
 
@@ -223,14 +230,30 @@ export default function CustomerPOIntake() {
       return;
     }
 
-    setSubmittedPO({
+    const totalQuantity = rows.reduce((acc, row) => acc + (+row.units || 0), 0);
+    const grandTotal = rows.reduce((acc, row) => acc + (+row.totalCost || 0), 0);
+    const averageUnitCost = totalQuantity > 0 ? Math.round((grandTotal / totalQuantity) * 100) / 100 : 0;
+
+    // Find catalog item match or fallback to catalog[0] or default id
+    const matchedCatalogItem = catalog.find(c => 
+      rows.some(r => r.catalog && (c.name.includes(r.catalog) || c.currentGenModel?.includes(r.catalog)))
+    );
+    const resolvedCatalogItemId = matchedCatalogItem?.id || catalog[0]?.id || 'CAT-14STD';
+
+    // Submit to global context so it appears on PoList
+    intakePO({
+      clientName: form.customerName,
       poNumber: form.poNumber,
-      customerName: form.customerName,
-      supplier: form.supplier,
-      additionalFilesCount: additionalFiles.length,
-      items: rows,
-      grandTotal: rows.reduce((acc, row) => acc + (+row.totalCost || 0), 0)
+      source: pdfFileName ? 'PDF_IMPORT' : 'MANUAL',
+      fileName: pdfFileName || undefined,
+      catalogItemId: resolvedCatalogItemId,
+      quantity: totalQuantity,
+      unitCost: averageUnitCost,
+      notes: `Intake with ${rows.length} line item(s). Supplier: ${form.supplier || 'N/A'}. Entity: ${rows[0]?.customerEntity || 'N/A'}.`
     });
+
+    // Navigate back to the list
+    navigate('/po');
   };
 
   const totalUnits = rows.reduce((acc, row) => acc + (+row.units || 0), 0);
@@ -255,10 +278,8 @@ export default function CustomerPOIntake() {
           )}
         </div>
 
-        {/* Upload Panels: PDF on Left, Additional Files Beside on Right */}
+        {/* Upload Panels */}
         <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
-          
-          {/* PDF Intake Container */}
           <div className='flex flex-col justify-between p-6 bg-white border shadow-sm rounded-2xl border-slate-200'>
             <div>
               <label className='block mb-1 text-sm font-semibold text-slate-700'>Upload Customer PO PDF</label>
@@ -276,7 +297,6 @@ export default function CustomerPOIntake() {
             </div>
           </div>
 
-          {/* Additional Files Upload Container */}
           <div className='flex flex-col justify-between p-6 bg-white border shadow-sm rounded-2xl border-slate-200'>
             <div>
               <label className='block mb-1 text-sm font-semibold text-slate-700'>Upload Additional Files</label>
@@ -290,7 +310,6 @@ export default function CustomerPOIntake() {
               />
             </div>
 
-            {/* List of Attached Files with "X" Remove Button */}
             {additionalFiles.length > 0 && (
               <div className='mt-4 pt-3 border-t border-slate-100 space-y-1.5'>
                 {additionalFiles.map((file, idx) => (
@@ -311,7 +330,6 @@ export default function CustomerPOIntake() {
               </div>
             )}
           </div>
-
         </div>
 
         {/* PO Header Details */}
@@ -570,14 +588,6 @@ export default function CustomerPOIntake() {
             Create Purchase Order
           </button>
         </div>
-
-        {/* Confirmation Output */}
-        {submittedPO && (
-          <div className='p-5 text-xs border rounded-2xl bg-emerald-50 border-emerald-200 text-emerald-900'>
-            <div className='mb-1 text-sm font-bold text-emerald-800'>PO Successfully Submitted</div>
-            Order <strong>{submittedPO.poNumber}</strong> recorded for <strong>{submittedPO.customerName}</strong> with {submittedPO.items.length} line items and {submittedPO.additionalFilesCount} supporting files, totalling <strong>${submittedPO.grandTotal.toFixed(2)} USD</strong>.
-          </div>
-        )}
 
       </div>
     </div>
