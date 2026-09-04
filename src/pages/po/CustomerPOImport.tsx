@@ -22,7 +22,6 @@ export default function CustomerPOIntake() {
   const { intakePO, catalog } = useData();
 
   const catalogOptions = [
-    'FN4FC',
     'HP EliteBook 8 G1i 14 AI',
     'HP EliteBook 8 G1i 16 AI',
     'HP EliteBook Ultra G1i AI',

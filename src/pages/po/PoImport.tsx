@@ -424,7 +424,7 @@ export default function PoImport() {
               disabled={!fileDataUrl || isExtracting}
               className="px-5 py-2.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
-              Create Purchase Order
+             Save Customer Purchase Order
             </button>
           </div>
         </div>

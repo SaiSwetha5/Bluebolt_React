@@ -85,6 +85,7 @@ export default function VendorOrderCreate() {
     if (pr) markPrConverted(pr.id);
     setPreviewVoId(vo.id);
     setVrModelCategory(''); setVrCurrentGen(''); setVrSku1(''); setVrVendor(''); setVrQuantity(1); setVrUnitCost(0); setVrCatalogItemId(''); setVrCognizantPo(''); setVrChannel('Webshop Portal' as any); setVrDestination('Cognizant Warehouse'); setVrWarehouseAddress(''); setVrError('');
+  
   }
 
   function addCustomCatalogItem() {
@@ -100,11 +101,11 @@ export default function VendorOrderCreate() {
         <p className="text-sm text-slate-500">Raises a Cognizant PO to a vendor against an <strong>approved Purchase Requisition</strong> — stock and on-order quantities were already checked when that requisition was created.</p>
       </div>
 
-      <div className="a360-card p-5 space-y-5">
+      <div className="p-5 space-y-5 a360-card">
         <h2 className="text-sm font-semibold text-slate-800">Vendor Request Form</h2>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Model &amp; Generation</p>
+          <p className="mb-3 text-xs font-semibold tracking-wide uppercase text-slate-400">Model &amp; Generation</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="a360-label">Model Category</label>
@@ -131,19 +132,19 @@ export default function VendorOrderCreate() {
         </div>
 
         {selectedCatalogItem && (
-          <div className="rounded-lg border border-brand-100 bg-brand-50 p-4 text-xs space-y-3">
-            <p className="font-semibold text-brand-700 uppercase tracking-wide">Catalog — {selectedCatalogItem.modelCategory} <span className="ml-2 normal-case font-normal text-brand-500">{selectedCatalogItem.eolTimeline}</span></p>
+          <div className="p-4 space-y-3 text-xs border rounded-lg border-brand-100 bg-brand-50">
+            <p className="font-semibold tracking-wide uppercase text-brand-700">Catalog — {selectedCatalogItem.modelCategory} <span className="ml-2 font-normal normal-case text-brand-500">{selectedCatalogItem.eolTimeline}</span></p>
             <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-              <div><p className="text-slate-400 font-medium">Current Gen Config</p><p className="text-slate-700">{selectedCatalogItem.currentGenConfigDetails}</p></div>
-              <div><p className="text-slate-400 font-medium">New Gen Config</p><p className="text-slate-700">{selectedCatalogItem.newGenConfigDetails}</p></div>
-              <div><p className="text-slate-400 font-medium">Current Gen SKU</p><code className="text-slate-700 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{selectedCatalogItem.currentGenSku}</code></div>
-              <div><p className="text-slate-400 font-medium">New Gen SKU</p><code className="text-slate-700 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{selectedCatalogItem.newGenSku}</code></div>
+              <div><p className="font-medium text-slate-400">Current Gen Config</p><p className="text-slate-700">{selectedCatalogItem.currentGenConfigDetails}</p></div>
+              <div><p className="font-medium text-slate-400">New Gen Config</p><p className="text-slate-700">{selectedCatalogItem.newGenConfigDetails}</p></div>
+              <div><p className="font-medium text-slate-400">Current Gen SKU</p><code className="text-slate-700 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{selectedCatalogItem.currentGenSku}</code></div>
+              <div><p className="font-medium text-slate-400">New Gen SKU</p><code className="text-slate-700 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{selectedCatalogItem.newGenSku}</code></div>
             </div>
           </div>
         )}
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Vendor &amp; Quantity</p>
+          <p className="mb-3 text-xs font-semibold tracking-wide uppercase text-slate-400">Vendor &amp; Quantity</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
               <label className="a360-label">Vendor</label>
@@ -164,28 +165,28 @@ export default function VendorOrderCreate() {
             </div>
             <div>
               <label className="a360-label">Total Cost</label>
-              <div className="a360-input bg-slate-50 font-semibold text-slate-800 flex items-center justify-between cursor-not-allowed">
-                <span className="text-slate-400 font-normal text-xs">USD</span>
+              <div className="flex items-center justify-between font-semibold cursor-not-allowed a360-input bg-slate-50 text-slate-800">
+                <span className="text-xs font-normal text-slate-400">USD</span>
                 <span>{totalCost.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
               </div>
             </div>
           </div>
           <div>
-            <label className="a360-label">Catalog Item <span className="text-slate-400 font-normal">(from catalog)</span></label>
+            <label className="a360-label">Catalog Item <span className="font-normal text-slate-400">(from catalog)</span></label>
             <div className="flex gap-2">
-              <select className="a360-input flex-1" value={vrCatalogItemId} onChange={e => onCatalogItemChange(e.target.value)}>
+              <select className="flex-1 a360-input" value={vrCatalogItemId} onChange={e => onCatalogItemChange(e.target.value)}>
                 <option value="">Select from catalog...</option>
                 {filteredCatalogItems.map(item => <option key={item.id} value={item.id}>{item.currentGenModel} — {item.currentGenSku}</option>)}
                 {customCatalogItems.map(item => <option key={item.id} value={item.id}>{item.name} (Custom)</option>)}
               </select>
-              <input type="text" className="a360-input w-64" value={newCatalogItemName} onChange={e => setNewCatalogItemName(e.target.value)} placeholder="Custom catalog item..." />
-              <button type="button" className="a360-btn-primary px-4" onClick={addCustomCatalogItem}>+</button>
+              <input type="text" className="w-64 a360-input" value={newCatalogItemName} onChange={e => setNewCatalogItemName(e.target.value)} placeholder="Custom catalog item..." />
+              <button type="button" className="px-4 a360-btn-primary" onClick={addCustomCatalogItem}>+</button>
             </div>
           </div>
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">PO &amp; Channel</p>
+          <p className="mb-3 text-xs font-semibold tracking-wide uppercase text-slate-400">PO &amp; Channel</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="a360-label">Cognizant PO</label>
@@ -203,7 +204,7 @@ export default function VendorOrderCreate() {
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Destination</p>
+          <p className="mb-3 text-xs font-semibold tracking-wide uppercase text-slate-400">Destination</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="a360-label">Destination</label>
