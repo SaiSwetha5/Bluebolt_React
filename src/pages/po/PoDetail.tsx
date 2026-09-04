@@ -18,7 +18,7 @@ export default function PoDetail() {
   const [emailBody, setEmailBody] = useState('');
 
   const po = purchaseOrders.find(p => p.id === id);
-  if (!po) return <div className="text-slate-500 p-8">Purchase order not found.</div>;
+  if (!po) return <div className="p-8 text-slate-500">Purchase order not found.</div>;
 
   const item = catalog.find(c => c.id === po.catalogItemId);
   const audit = auditFor(po.id);
@@ -53,39 +53,39 @@ export default function PoDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <div className="md:col-span-2 space-y-4">
-          <div className="a360-card p-5 space-y-4">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+        <div className="space-y-4 md:col-span-2">
+          <div className="p-5 space-y-4 a360-card">
             <h2 className="text-sm font-semibold text-slate-800">Purchase Order Summary</h2>
             <div className="grid grid-cols-2 gap-4 text-xs">
-              <div><p className="text-slate-400">Client Name</p><p className="text-slate-800 font-semibold text-sm">{po.clientName}</p></div>
-              <div><p className="text-slate-400">PO Number</p><p className="text-slate-800 font-semibold text-sm">{po.poNumber}</p></div>
-              <div><p className="text-slate-400">Catalog Item</p><p className="text-slate-800 font-semibold text-sm">{item?.name ?? po.catalogItemId}</p></div>
-              <div><p className="text-slate-400">Quantity</p><p className="text-slate-800 font-semibold text-sm">{po.quantity} units</p></div>
-              <div><p className="text-slate-400">Unit Cost / Total</p><p className="text-slate-800 font-semibold text-sm">USD {po.unitCost.toLocaleString()} / USD {(po.quantity * po.unitCost).toLocaleString()}</p></div>
-              <div><p className="text-slate-400">Source</p><p className="text-slate-800 font-semibold text-sm">{po.source}</p></div>
-              {po.requestId && <div><p className="text-slate-400">Request ID</p><p className="text-slate-800 font-semibold text-sm">{po.requestId}</p></div>}
+              <div><p className="text-slate-400">Client Name</p><p className="text-sm font-semibold text-slate-800">{po.clientName}</p></div>
+              <div><p className="text-slate-400">PO Number</p><p className="text-sm font-semibold text-slate-800">{po.poNumber}</p></div>
+              <div><p className="text-slate-400">Catalog Item</p><p className="text-sm font-semibold text-slate-800">{item?.name ?? po.catalogItemId}</p></div>
+              <div><p className="text-slate-400">Quantity</p><p className="text-sm font-semibold text-slate-800">{po.quantity} units</p></div>
+              <div><p className="text-slate-400">Unit Cost / Total</p><p className="text-sm font-semibold text-slate-800">USD {po.unitCost.toLocaleString()} / USD {(po.quantity * po.unitCost).toLocaleString()}</p></div>
+              <div><p className="text-slate-400">Source</p><p className="text-sm font-semibold text-slate-800">{po.source}</p></div>
+              {po.requestId && <div><p className="text-slate-400">Request ID</p><p className="text-sm font-semibold text-slate-800">{po.requestId}</p></div>}
               {po.notes && <div className="col-span-2"><p className="text-slate-400">Notes / Scope</p><p className="text-slate-700 mt-0.5">{po.notes}</p></div>}
-              {po.approvedBy && <div><p className="text-slate-400">Approved By</p><p className="text-slate-800 font-semibold text-sm">{po.approvedBy}</p></div>}
-              {po.rejectedReason && <div className="col-span-2"><p className="text-slate-400">Rejection Reason</p><p className="text-rose-600 font-semibold text-sm">{po.rejectedReason}</p></div>}
+              {po.approvedBy && <div><p className="text-slate-400">Approved By</p><p className="text-sm font-semibold text-slate-800">{po.approvedBy}</p></div>}
+              {po.rejectedReason && <div className="col-span-2"><p className="text-slate-400">Rejection Reason</p><p className="text-sm font-semibold text-rose-600">{po.rejectedReason}</p></div>}
             </div>
           </div>
 
           {po.fileDataUrl && (
-            <div className="a360-card p-5">
-              <h2 className="text-sm font-semibold text-slate-800 mb-3">Attached Purchase Order Document</h2>
+            <div className="p-5 a360-card">
+              <h2 className="mb-3 text-sm font-semibold text-slate-800">Attached Purchase Order Document</h2>
               <PdfViewer dataUrl={po.fileDataUrl} fileName={po.fileName} />
             </div>
           )}
         </div>
 
         <div className="space-y-4">
-          <div className="a360-card p-5 space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Audit Trail</h3>
+          <div className="p-5 space-y-3 a360-card">
+            <h3 className="text-xs font-bold tracking-wider uppercase text-slate-400">Audit Trail</h3>
             <div className="space-y-2 text-xs">
               {audit.map(entry => (
-                <div key={entry.id} className="border-b border-slate-100 pb-2">
-                  <p className="text-slate-700 font-medium">{entry.details}</p>
+                <div key={entry.id} className="pb-2 border-b border-slate-100">
+                  <p className="font-medium text-slate-700">{entry.details}</p>
                   <p className="text-[10px] text-slate-400 mt-0.5">{fmt(entry.timestamp)} · {entry.actor}</p>
                 </div>
               ))}
@@ -96,14 +96,14 @@ export default function PoDetail() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4 border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-lg p-6 space-y-4 bg-white border shadow-xl rounded-xl border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-bold">✓</div>
+                <div className="flex items-center justify-center w-8 h-8 font-bold rounded-full bg-emerald-100 text-emerald-600">✓</div>
                 <h3 className="text-base font-bold text-slate-800">Approve & Send Notifications</h3>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 text-lg">×</button>
+              <button onClick={() => setShowModal(false)} className="text-lg text-slate-400 hover:text-slate-600">×</button>
             </div>
             <div className="space-y-3 text-xs">
               <div>

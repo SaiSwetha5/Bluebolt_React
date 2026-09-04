@@ -36,7 +36,6 @@ export default function App() {
 
             {/* PO — import MUST be before :id */}
             <Route path="po" element={<PoList />} />
-            <Route path="po/import" element={<PoImport />} />
             <Route path="po/:id" element={<PoDetail />} />
              <Route path="po/customImport" element={<CustomerPOIntake />} />
                

@@ -8,7 +8,6 @@ const navGroups: NavGroup[] = [
   { title: 'Overview', items: [{ label: 'Dashboard', icon: '▦', link: '/dashboard' }] },
   { title: 'Asset Requests', items: [
     { label: 'Customer POs', icon: '📄', link: '/po' },
-    { label: 'PO Import', icon: '⬇', link: '/po/import' },
     { label: 'PO Custom Import', icon: '⬇', link: '/po/customImport' },
 
     

@@ -19,10 +19,11 @@ export default function PoList() {
           <h1 className="text-lg font-bold text-slate-800">Customer Purchase Orders</h1>
           <p className="text-sm text-slate-500">Intake, acknowledgment and approval queue for POs received from clients — distinct from Cognizant's own POs to vendors, raised later in Procurement.</p>
         </div>
-        <Link to="/po/import" className="a360-btn-primary">+ New Customer PO Intake</Link>
+        <Link to="/po/customImport" className="a360-btn-primary">+ New Customer PO Intake</Link>
       </div>
 
-      <div className="a360-card p-3 flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 p-3 a360-card">
+        
         {FILTERS.map(f => (
           <button key={f} onClick={() => setActive(f)}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${active === f ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
@@ -31,7 +32,7 @@ export default function PoList() {
         ))}
       </div>
 
-      <div className="a360-card overflow-x-auto">
+      <div className="overflow-x-auto a360-card">
         <table className="w-full">
           <thead><tr>
             <th className="a360-th">Customer PO ID</th><th className="a360-th">Customer PO Number</th><th className="a360-th">Client</th>
@@ -40,8 +41,8 @@ export default function PoList() {
           </tr></thead>
           <tbody>
             {filtered.map(po => (
-              <tr key={po.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => navigate(`/po/${po.id}`)}>
-                <td className="a360-td font-medium text-brand-700">{po.id}</td>
+              <tr key={po.id} className="cursor-pointer hover:bg-slate-50" onClick={() => navigate(`/po/${po.id}`)}>
+                <td className="font-medium a360-td text-brand-700">{po.id}</td>
                 <td className="a360-td">{po.poNumber}</td>
                 <td className="a360-td">{po.clientName}</td>
                 <td className="a360-td">{po.source === 'PDF_IMPORT' ? 'PDF Import' : 'API Integration'}</td>
@@ -50,7 +51,7 @@ export default function PoList() {
                 <td className="a360-td text-slate-500">{new Date(po.submittedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan={8} className="a360-td text-center text-slate-400 py-8">No purchase orders in this state.</td></tr>}
+            {!filtered.length && <tr><td colSpan={8} className="py-8 text-center a360-td text-slate-400">No purchase orders in this state.</td></tr>}
           </tbody>
         </table>
       </div>

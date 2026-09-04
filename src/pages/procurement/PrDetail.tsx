@@ -35,7 +35,7 @@ export default function PrDetail() {
     ];
   }, [pr]);
 
-  if (!pr) return <div className="text-center text-slate-400 py-16">Purchase requisition not found.</div>;
+  if (!pr) return <div className="py-16 text-center text-slate-400">Purchase requisition not found.</div>;
 
   function onSendEmail(e: { prId: string; toEmail: string }) {
     emailPrForApproval(e.prId, e.toEmail);
@@ -48,7 +48,7 @@ export default function PrDetail() {
 
   return (
     <div className="space-y-5">
-      <div className="no-print flex items-center justify-between">
+      <div className="flex items-center justify-between no-print">
         <div>
           <Link to="/procurement/requisitions" className="text-sm text-slate-500 hover:text-brand-600">← Back to Purchase Requisitions</Link>
           <div className="flex items-center gap-3 mt-1">
@@ -57,7 +57,7 @@ export default function PrDetail() {
           </div>
           <p className="text-sm text-slate-500">Against Customer PO {pr.poId}{po ? ` · ${po.clientName}` : ''}</p>
         </div>
-        <div className="flex gap-2 flex-wrap justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
           <button onClick={() => window.print()} className="a360-btn-secondary">Download / Print PDF</button>
           {pr.status === 'DRAFT' && <button onClick={() => setEmailPrId(pr.id)} className="a360-btn-primary">Send for Approval</button>}
           {pr.status === 'PENDING_APPROVAL' && <>
@@ -67,41 +67,41 @@ export default function PrDetail() {
         </div>
       </div>
 
-      <div className="no-print a360-card p-5"><Timeline steps={steps} /></div>
+      <div className="p-5 no-print a360-card"><Timeline steps={steps} /></div>
 
       {pr.status === 'PENDING_APPROVAL' && (
-        <div className="no-print rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
-          <div className="mt-0.5 h-5 w-5 rounded-full bg-amber-400 flex items-center justify-center flex-shrink-0"><span className="text-white text-xs font-bold">!</span></div>
+        <div className="flex items-start gap-3 p-4 border rounded-lg no-print border-amber-200 bg-amber-50">
+          <div className="mt-0.5 h-5 w-5 rounded-full bg-amber-400 flex items-center justify-center flex-shrink-0"><span className="text-xs font-bold text-white">!</span></div>
           <div className="text-sm"><p className="font-semibold text-amber-800">Awaiting approval</p><p className="text-amber-700 mt-0.5">Approval request sent to <strong>{pr.emailedTo}</strong>{pr.emailedAt ? ` on ${fmt(pr.emailedAt)}` : ''}. A notification copy was routed to the procurement mailbox <strong>({PROCUREMENT_MAILBOX})</strong>. Use the <strong>Approve</strong> or <strong>Reject</strong> buttons above to action this requisition.</p></div>
         </div>
       )}
       {pr.status === 'APPROVED' && (
-        <div className="no-print rounded-lg border border-emerald-200 bg-emerald-50 p-4 flex items-start gap-3">
-          <div className="mt-0.5 h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0"><span className="text-white text-xs font-bold">✓</span></div>
+        <div className="flex items-start gap-3 p-4 border rounded-lg no-print border-emerald-200 bg-emerald-50">
+          <div className="mt-0.5 h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0"><span className="text-xs font-bold text-white">✓</span></div>
           <div className="text-sm"><p className="font-semibold text-emerald-800">Approved — procurement process triggered</p><p className="text-emerald-700 mt-0.5">Approved by <strong>{pr.approvedBy}</strong>{pr.approvedAt ? ` on ${fmt(pr.approvedAt)}` : ''}. A procurement trigger notification was automatically sent to <strong>{PROCUREMENT_MAILBOX}</strong>. Click <strong>Raise Cognizant PO</strong> to complete the downstream procurement.</p></div>
         </div>
       )}
       {pr.status === 'REJECTED' && (
-        <div className="no-print rounded-lg border border-rose-200 bg-rose-50 p-4 flex items-start gap-3">
-          <div className="mt-0.5 h-5 w-5 rounded-full bg-rose-500 flex items-center justify-center flex-shrink-0"><span className="text-white text-xs font-bold">✕</span></div>
+        <div className="flex items-start gap-3 p-4 border rounded-lg no-print border-rose-200 bg-rose-50">
+          <div className="mt-0.5 h-5 w-5 rounded-full bg-rose-500 flex items-center justify-center flex-shrink-0"><span className="text-xs font-bold text-white">✕</span></div>
           <div className="text-sm"><p className="font-semibold text-rose-800">Rejected</p><p className="text-rose-700 mt-0.5">Rejected by <strong>{pr.approvedBy}</strong>. Reason: {pr.rejectedReason}.</p></div>
         </div>
       )}
       {pr.status === 'CONVERTED' && (
-        <div className="no-print rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm">
+        <div className="p-4 text-sm border rounded-lg no-print border-brand-200 bg-brand-50">
           <p className="font-semibold text-brand-800">Converted to Cognizant PO</p>
           <p className="text-brand-700 mt-0.5">This requisition has been fully actioned and converted into a vendor order.</p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          <div className="print-area a360-card p-6">
-            <div className="flex items-start justify-between border-b border-slate-100 pb-4 mb-4">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <div className="p-6 print-area a360-card">
+            <div className="flex items-start justify-between pb-4 mb-4 border-b border-slate-100">
               <div><p className="text-xs text-slate-400">Cognizant · Asset360</p><h2 className="text-base font-bold text-slate-800">Purchase Requisition {pr.id}</h2></div>
               <StatusBadge status={pr.status} />
             </div>
-            <dl className="grid grid-cols-2 gap-y-3 text-sm">
+            <dl className="grid grid-cols-2 text-sm gap-y-3">
               <dt className="text-slate-400">Customer PO</dt><dd className="font-medium text-slate-800">{pr.poId}{po ? ` (${po.poNumber})` : ''}</dd>
               <dt className="text-slate-400">Client</dt><dd className="font-medium text-slate-800">{po?.clientName ?? '—'}</dd>
               <dt className="text-slate-400">Request ID</dt><dd className="font-medium text-slate-800">{pr.requestId}</dd>
@@ -116,19 +116,48 @@ export default function PrDetail() {
               {pr.rejectedReason && <><dt className="text-slate-400">Rejection Reason</dt><dd className="font-medium text-rose-600">{pr.rejectedReason}</dd></>}
             </dl>
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 mt-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Balance quantity calculation</p>
-              <div className="grid grid-cols-4 gap-3 text-sm">
-                <div><p className="text-slate-500">Requested</p><p className="font-semibold text-slate-800">{pr.requestedQty}</p></div>
-                <div><p className="text-slate-500">In Warehouse</p><p className="font-semibold text-slate-800">{totalCmdbInStock}</p></div>
-                <div className="border-l border-slate-200 pl-3"><p className="text-slate-500">Balance</p><p className={`font-bold text-base ${balanceQty===0?'text-emerald-600':'text-brand-700'}`}>{balanceQty}</p></div>
-              </div>
-              <p className="text-sm text-slate-600 mt-3">Estimated unit cost <span className="font-medium">${pr.estimatedUnitCost.toLocaleString()}</span> × balance {balanceQty} = <span className="font-semibold text-slate-800">${estimatedTotalCost.toLocaleString()}</span> estimated spend.</p>
-              {balanceQty===0 && pr.requestedQty>0 && <p className="mt-2 text-xs text-emerald-600 font-medium">✓ Warehouse stock fully covers this request — no vendor order needed.</p>}
-              {balanceQty>0 && totalCmdbInStock>0 && <p className="mt-2 text-xs text-brand-600 font-medium">ℹ Partial stock applied: {totalCmdbInStock} available unit(s) deducted from total requisition.</p>}
+            <div className="p-4 mt-4 border rounded-lg border-slate-200 bg-slate-50">
+              <p className="mb-2 text-xs font-semibold tracking-wide uppercase text-slate-500">Balance quantity calculation</p>
+          <div className="grid items-center grid-cols-4 gap-3 text-sm">
+  {/* Requested */}
+  <div>
+    <p className="text-slate-500">Requested</p>
+    <p className="font-semibold text-slate-800">
+      {pr.requestedQty}
+    </p>
+  </div>
+
+  {/* In Warehouse */}
+  <div>
+    <p className="text-slate-500">In Warehouse</p>
+    <p className="font-semibold text-slate-800">
+      {totalCmdbInStock}
+    </p>
+  </div>
+
+  {/* Balance */}
+  <div className="pl-3 border-l border-slate-200">
+    <p className="text-slate-500">Balance</p>
+    <p
+      className={`font-bold text-base ${
+        balanceQty === 0
+          ? "text-emerald-600"
+          : "text-brand-700"
+      }`}
+    >
+      {balanceQty}
+    </p>
+  </div>
+
+ 
+  
+</div>
+              <p className="mt-3 text-sm text-slate-600">Estimated unit cost <span className="font-medium">${pr.estimatedUnitCost.toLocaleString()}</span> × balance {balanceQty} = <span className="font-semibold text-slate-800">${estimatedTotalCost.toLocaleString()}</span> estimated spend.</p>
+              {balanceQty===0 && pr.requestedQty>0 && <p className="mt-2 text-xs font-medium text-emerald-600">✓ Warehouse stock fully covers this request — no vendor order needed.</p>}
+              {balanceQty>0 && totalCmdbInStock>0 && <p className="mt-2 text-xs font-medium text-brand-600">ℹ Partial stock applied: {totalCmdbInStock} available unit(s) deducted from total requisition.</p>}
             </div>
-            <div className="mt-4 border-t border-slate-100 pt-3">
-              <p className="text-xs text-slate-400 uppercase font-semibold tracking-wide mb-1">Justification</p>
+            <div className="pt-3 mt-4 border-t border-slate-100">
+              <p className="mb-1 text-xs font-semibold tracking-wide uppercase text-slate-400">Justification</p>
               <p className="text-sm text-slate-700">{pr.justification}</p>
             </div>
           </div>
