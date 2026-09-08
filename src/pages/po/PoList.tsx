@@ -36,7 +36,8 @@ export default function PoList() {
         <table className="w-full">
           <thead><tr>
             <th className="a360-th">Customer PO ID</th><th className="a360-th">Customer PO Number</th><th className="a360-th">Client</th>
-            <th className="a360-th">Source</th><th className="a360-th">Qty</th><th className="a360-th">Unit Cost</th>
+            <th className="a360-th">Part Number</th><th className="a360-th">Source</th><th className="a360-th">Qty</th><th className="a360-th">Unit Cost</th>
+            <th className="a360-th">Shipment</th><th className="a360-th">Location</th>
             <th className="a360-th">Submitted</th>
           </tr></thead>
           <tbody>
@@ -45,13 +46,16 @@ export default function PoList() {
                 <td className="font-medium a360-td text-brand-700">{po.id}</td>
                 <td className="a360-td">{po.poNumber}</td>
                 <td className="a360-td">{po.clientName}</td>
+                <td className="a360-td">{po.partNumber || '—'}</td>
                 <td className="a360-td">{po.source === 'PDF_IMPORT' ? 'PDF Import' : 'API Integration'}</td>
                 <td className="a360-td">{po.quantity}</td>
                 <td className="a360-td">${po.unitCost.toLocaleString()}</td>
+                <td className="a360-td">{po.shipment || '—'}</td>
+                <td className="a360-td">{[po.city, po.state, po.country].filter(Boolean).join(', ') || '—'}</td>
                 <td className="a360-td text-slate-500">{new Date(po.submittedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan={8} className="py-8 text-center a360-td text-slate-400">No purchase orders in this state.</td></tr>}
+            {!filtered.length && <tr><td colSpan={10} className="py-8 text-center a360-td text-slate-400">No purchase orders in this state.</td></tr>}
           </tbody>
         </table>
       </div>

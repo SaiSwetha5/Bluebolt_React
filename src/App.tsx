@@ -25,6 +25,17 @@ import CustomerHierarchy from './pages/inventory/CustomerHierarchy';
 import CustomerEntityScreen from './pages/inventory/CustomerEntityScreen';
 import CustomerPOIntake from './pages/po/CustomerPOImport';
 
+// --- Continuation modules (additive imports; nothing above this line was touched) ---
+import OperatingLeaseCalculator from './pages/leasing/OperatingLeaseCalculator';
+import ReceivablesOverview from './pages/receivables/ReceivablesOverview';
+import SubscriptionList from './pages/receivables/SubscriptionList';
+import SubscriptionCreate from './pages/receivables/SubscriptionCreate';
+import SubscriptionDetail from './pages/receivables/SubscriptionDetail';
+import UsersList from './pages/accounts/UsersList';
+import RolesMatrix from './pages/accounts/RolesMatrix';
+import VendorAccounts from './pages/accounts/VendorAccounts';
+import CustomerAccounts from './pages/accounts/CustomerAccounts';
+
 export default function App() {
   return (
     <DataProvider>
@@ -83,6 +94,19 @@ element={<CustomerEntityScreen />}
        
             {/* Audit */}
             <Route path="audit" element={<AuditLog />} />
+
+            {/* DaaS Receivables — new for this continuation; new before :id */}
+            <Route path="leasing/calculator" element={<OperatingLeaseCalculator />} />
+            <Route path="receivables" element={<ReceivablesOverview />} />
+            <Route path="receivables/subscriptions" element={<SubscriptionList />} />
+            <Route path="receivables/subscriptions/new" element={<SubscriptionCreate />} />
+            <Route path="receivables/subscriptions/:id" element={<SubscriptionDetail />} />
+
+            {/* Account Management — new for this continuation */}
+            <Route path="accounts/users" element={<UsersList />} />
+            <Route path="accounts/roles" element={<RolesMatrix />} />
+            <Route path="accounts/vendors" element={<VendorAccounts />} />
+            <Route path="accounts/customers" element={<CustomerAccounts />} />
 
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>

@@ -2,10 +2,11 @@ export type PoSource = 'API' | 'PDF_IMPORT' | 'MANUAL';
 export type PoStatus = 'RECEIVED' | 'ACKNOWLEDGED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
 export interface PurchaseOrder {
   id: string; requestId?: string; clientName: string; poNumber: string; source: PoSource;
-  fileName?: string; fileDataUrl?: string; catalogItemId: string;
+  fileName?: string; fileDataUrl?: string; catalogItemId: string; partNumber?: string;
   quantity: number; unitCost: number; status: PoStatus; submittedAt: string;
   acknowledgedAt?: string; approvedAt?: string; approvedBy?: string;
   rejectedReason?: string; notes?: string;
+  supplier?: string; shipment?: string; country?: string; state?: string; city?: string;
 }
 export type PrStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'CONVERTED';
 export interface PurchaseRequisition {
@@ -115,3 +116,49 @@ export const REPORTING_HIERARCHIES: ReportingHierarchy[] = [
   'HW > Laptops > DaaS', 'HW > Desktops > DaaS', 'HW > Workstations > DaaS',
 ];
 export const PROCUREMENT_MAILBOX = 'procurement.mailbox@cognizant.com';
+
+// ============================================================================
+// Continuation modules — DaaS Receivables & Account Management
+// (appended; nothing above this line was modified)
+// ============================================================================
+
+// ---- DaaS Receivables (customer subscriptions / device rentals / receipts) ----
+export type SubscriptionStatus = 'ACTIVE' | 'PENDING' | 'SUSPENDED' | 'CLOSED';
+export interface CustomerSubscription {
+  id: string; customerAccountId: string; customerName: string;
+  assetId: string; catalogItemId: string; serviceClass: ServiceClass;
+  assetCost: number; annualInterestRatePct: number; termMonths: number;
+  residualValue: number; monthlyPayment: number;
+  startDate: string; endDate: string; billingDay: number;
+  status: SubscriptionStatus; nextInvoicePeriod: number; createdAt: string;
+}
+export type ReceivableInvoiceStatus = 'DUE' | 'SENT' | 'PAID' | 'OVERDUE';
+export interface ReceivableInvoice {
+  id: string; subscriptionId: string; customerName: string; period: number;
+  amount: number; issueDate: string; dueDate: string; status: ReceivableInvoiceStatus;
+  receiptId?: string;
+}
+export interface Receipt {
+  id: string; invoiceId: string; subscriptionId: string; amount: number;
+  receivedAt: string; method: 'ACH' | 'WIRE' | 'CARD' | 'CHECK'; reference: string;
+}
+
+// ---- Account Management (users, roles/RBAC, vendor & customer accounts) ----
+export type SystemRole = 'Admin' | 'Procurement Manager' | 'Finance Approver' | 'Warehouse Ops' | 'Customer Success' | 'Viewer';
+export const SYSTEM_ROLES: SystemRole[] = ['Admin', 'Procurement Manager', 'Finance Approver', 'Warehouse Ops', 'Customer Success', 'Viewer'];
+export interface Permission { module: string; view: boolean; edit: boolean; approve: boolean; }
+export interface RoleDefinition { role: SystemRole; description: string; permissions: Permission[]; }
+export type SsoProvider = 'Okta' | 'Azure AD' | 'Google Workspace' | 'None';
+export interface AppUser {
+  id: string; name: string; email: string; role: SystemRole;
+  status: 'ACTIVE' | 'DISABLED'; ssoProvider: SsoProvider;
+  lastLogin?: string; createdAt: string;
+}
+export interface VendorAccount {
+  id: string; name: VendorName; contactName: string; contactEmail: string;
+  contractRef: string; paymentTerms: string; status: 'ACTIVE' | 'INACTIVE';
+}
+export interface CustomerAccount {
+  id: string; name: string; region: string; billingContact: string; billingEmail: string;
+  status: 'ACTIVE' | 'INACTIVE'; creditTermDays: number;
+}

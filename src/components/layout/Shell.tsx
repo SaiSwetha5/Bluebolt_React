@@ -37,6 +37,18 @@ const navGroups: NavGroup[] = [
   { title: 'Governance', items: [
     { label: 'Audit Log', icon: '🔎', link: '/audit' },
   ]},
+  // --- Continuation modules (additive nav groups) ---
+  { title: 'DaaS Receivables', items: [
+    { label: 'Receivables Overview', icon: '💵', link: '/receivables' },
+    { label: 'Customer Subscriptions', icon: '📱', link: '/receivables/subscriptions' },
+    { label: 'Lease Calculator', icon: '🧮', link: '/leasing/calculator' },
+  ]},
+  { title: 'Account Management', items: [
+    { label: 'Users', icon: '👤', link: '/accounts/users' },
+    { label: 'Roles & Permissions', icon: '🛡', link: '/accounts/roles' },
+    { label: 'Vendor Accounts', icon: '🏭', link: '/accounts/vendors' },
+    { label: 'Customer Accounts', icon: '🏢', link: '/accounts/customers' },
+  ]},
 ];
 
 export default function Shell() {

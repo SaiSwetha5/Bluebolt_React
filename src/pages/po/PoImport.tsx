@@ -3,8 +3,31 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useData } from '../../store/DataContext';
 import PdfViewer from '../../components/ui/PdfViewer';
 import type { CatalogItem, PoSource } from '../../types/models';
+import { COUNTRY_NAMES, getStates, getCities, guessLocationFromText } from '../../utils/geoData';
 
 type PdfStep = 'upload' | 'extracting' | 'review';
+
+interface LineItem {
+  partNumber: string;
+  description: string;
+  catalogItemId: string;
+  quantity: number;
+  unitCost: number;
+}
+
+interface PoHeader {
+  clientName: string;
+  poNumber: string;
+  supplier: string;
+  shipment: string;
+  country: string;
+  state: string;
+  city: string;
+  notes: string;
+}
+
+const EMPTY_HEADER: PoHeader = { clientName: '', poNumber: '', supplier: '', shipment: '', country: '', state: '', city: '', notes: '' };
+const EMPTY_LINE_ITEM: LineItem = { partNumber: '', description: '', catalogItemId: '', quantity: 1, unitCost: 0 };
 
 // Browser-safe CDN loader to prevent worker/bundler freezes in Vite
 const getPdfJs = (): Promise<any> => {
@@ -21,7 +44,13 @@ const getPdfJs = (): Promise<any> => {
   });
 };
 
-async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<string> {
+/**
+ * Extracts text from the PDF, preserving row structure by grouping text items
+ * that share (roughly) the same vertical position on the page. This lets the
+ * line-item table and address blocks be parsed by position instead of by
+ * matching fixed sample-PO strings.
+ */
+async function extractPdfLines(arrayBuffer: ArrayBuffer): Promise<{ fullText: string; lines: string[] }> {
   const pdfjsLib = await getPdfJs();
   const pdf = await pdfjsLib.getDocument({
     data: new Uint8Array(arrayBuffer),
@@ -30,13 +59,35 @@ async function extractTextFromPdf(arrayBuffer: ArrayBuffer): Promise<string> {
     useSystemFonts: true
   }).promise;
 
-  const pages: string[] = [];
+  const allLines: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    pages.push(content.items.map((it: { str?: string }) => it.str ?? '').join(' '));
+    const items: { str: string; x: number; y: number }[] = content.items.map((it: any) => ({
+      str: it.str ?? '',
+      x: it.transform?.[4] ?? 0,
+      y: it.transform?.[5] ?? 0
+    })).filter((it: any) => it.str.trim().length > 0);
+
+    // Group items into visual rows: items whose y-position is within a small
+    // tolerance belong to the same line on the page.
+    const rows: { y: number; items: typeof items }[] = [];
+    for (const item of items) {
+      let row = rows.find(r => Math.abs(r.y - item.y) < 3);
+      if (!row) {
+        row = { y: item.y, items: [] };
+        rows.push(row);
+      }
+      row.items.push(item);
+    }
+    rows.sort((a, b) => b.y - a.y); // top of page first
+    for (const row of rows) {
+      row.items.sort((a, b) => a.x - b.x);
+      allLines.push(row.items.map(it => it.str).join(' ').replace(/\s+/g, ' ').trim());
+    }
   }
-  return pages.join('\n');
+
+  return { fullText: allLines.join('\n'), lines: allLines.filter(Boolean) };
 }
 
 function bestCatalogMatch(primary: string, fullText: string, catalog: CatalogItem[]): string {
@@ -68,9 +119,9 @@ function bestCatalogMatch(primary: string, fullText: string, catalog: CatalogIte
     for (const brand of ['hp', 'dell', 'lenovo']) {
       if (haystack.includes(brand) && (p.includes(brand) || f.includes(brand))) score += 2;
     }
-    const specPat = /\b(\d+(?:gb|tb|ghz|inch|"|core))\b/gi;
-    const hSpecs = [...haystack.matchAll(specPat)].map(m => m[1].toLowerCase());
-    const pSpecs = [...(p + ' ' + f).matchAll(specPat)].map(m => m[1].toLowerCase());
+    const specPat = /\b(\d+)\s?(gb|tb|ghz|inch|"|core)\b/gi;
+    const hSpecs = [...haystack.matchAll(specPat)].map(m => `${m[1]}${m[2]}`.toLowerCase());
+    const pSpecs = [...(p + ' ' + f).matchAll(specPat)].map(m => `${m[1]}${m[2]}`.toLowerCase());
     for (const sp of hSpecs) {
       if (pSpecs.includes(sp)) score += 2;
     }
@@ -80,6 +131,54 @@ function bestCatalogMatch(primary: string, fullText: string, catalog: CatalogIte
     }
   }
   return bestScore >= 3 ? bestId : '';
+}
+
+/** Pulls PO-level header fields (client, PO#, supplier, shipment, location) out of the parsed lines. */
+function parseHeaderFields(lines: string[], fullText: string): Partial<PoHeader> {
+  const header: Partial<PoHeader> = {};
+
+  const poMatch = fullText.match(/(?:P\.?O\.?\s*(?:No\.?|Number|#)?|ORDER\s*NO\.?|Order\s*Number)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i);
+  if (poMatch) header.poNumber = poMatch[1].trim();
+
+  const custMatch = fullText.match(/(?:BILL\s*TO|Customer|Client)\s*[:\-]?\s*\n?\s*([A-Z][A-Za-z0-9&.,'\- ]{3,60})/i);
+  if (custMatch) header.clientName = custMatch[1].split(/\n|,\s*(?:Attn|Address)/i)[0].trim();
+
+  const suppMatch = fullText.match(/(?:SUPPLIER|VENDOR|SOLD\s*BY)\s*[:\-]?\s*\n?\s*([A-Z0-9][A-Za-z0-9&.,'\- ]{3,60})/i);
+  if (suppMatch) header.supplier = suppMatch[1].split(/\n|,\s*(?:Attn|Address)/i)[0].trim();
+
+  const shipMatch = fullText.match(/(?:SHIP\s*VIA|SHIPPING\s*METHOD|SHIPMENT|FREIGHT\s*TERMS?)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 \-]{2,40})/i);
+  if (shipMatch) header.shipment = shipMatch[1].trim();
+
+  const loc = guessLocationFromText(fullText);
+  if (loc.country) header.country = loc.country;
+  if (loc.state) header.state = loc.state;
+  if (loc.city) header.city = loc.city;
+
+  return header;
+}
+
+/** Detects one or more line-item rows (part/sku, description, qty, unit cost) from the parsed rows. */
+function parseLineItems(lines: string[]): Omit<LineItem, 'catalogItemId'>[] {
+  const items: Omit<LineItem, 'catalogItemId'>[] = [];
+
+  // Row shape: <SKU/Part> <description...> <qty> <unit price>
+  const rowPattern = /^([A-Z0-9][A-Z0-9\-\.\/]{2,19})\s+(.+?)\s+(\d{1,5})\s*(?:x|each|units?|pcs?)?\s*[@\-]?\s*\$?\s*([\d,]+\.\d{2})\s*(?:USD)?$/i;
+  // Pipe-delimited table row: | SKU | description | qty | price |
+  const pipePattern = /\|?\s*([A-Z0-9][A-Z0-9\-\.\/]{2,19})\s*\|\s*(.+?)\s*\|\s*(\d{1,5})\s*(?:each)?\s*\|\s*\$?\s*([\d,]+\.\d{2})/i;
+
+  for (const line of lines) {
+    const m = line.match(rowPattern) || line.match(pipePattern);
+    if (!m) continue;
+    const [, partNumber, description, qty, price] = m;
+    items.push({
+      partNumber: partNumber.trim(),
+      description: description.trim(),
+      quantity: parseInt(qty, 10) || 1,
+      unitCost: parseFloat(price.replace(/,/g, '')) || 0
+    });
+  }
+
+  return items;
 }
 
 export default function PoImport() {
@@ -103,27 +202,12 @@ export default function PoImport() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [pdfError, setPdfError] = useState('');
   const [additionalFiles, setAdditionalFiles] = useState<File[]>([]);
+  const [pdfFullText, setPdfFullText] = useState('');
 
-  // Editable review data state
-  const [extractedData, setExtractedData] = useState<{
-    clientName: string;
-    poNumber: string;
-    catalogItem: string;
-    catalogItemId: string;
-    quantity: number;
-    unitCost: number;
-    supplier: string;
-    notes: string;
-  }>({
-    clientName: '',
-    poNumber: '',
-    catalogItem: '',
-    catalogItemId: '',
-    quantity: 1,
-    unitCost: 0,
-    supplier: '',
-    notes: ''
-  });
+  // Editable header (shared across all line items) + dynamic line-item import table
+  const [header, setHeader] = useState<PoHeader>(EMPTY_HEADER);
+  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [selectedRow, setSelectedRow] = useState<number | null>(null);
 
   const activeCatalog = catalog.filter(c => c.active);
 
@@ -137,13 +221,60 @@ export default function PoImport() {
     return Array.from(map.entries()).map(([label, items]) => ({ label, items }));
   })();
 
-  const selectedItem = activeCatalog.find(c => c.id === catalogItemId);
-  const selectedCost = selectedItem?.vendorMappings[0]?.unitCost ?? selectedItem?.clientListPrice ?? 0;
-
   function onCatalogChange(id: string) {
     setCatalogItemId(id);
     const item = activeCatalog.find(c => c.id === id);
     if (item) setUnitCost(item.vendorMappings[0]?.unitCost ?? item.clientListPrice);
+  }
+
+  const stateOptions = header.country ? getStates(header.country) : [];
+  const cityOptions = header.country && header.state ? getCities(header.country, header.state) : [];
+
+  function updateHeader(patch: Partial<PoHeader>) {
+    setHeader(h => ({ ...h, ...patch }));
+  }
+
+  function onCountryChange(country: string) {
+    updateHeader({ country, state: '', city: '' });
+  }
+
+  function onStateChange(state: string) {
+    updateHeader({ state, city: '' });
+  }
+
+  function updateLineItem(index: number, patch: Partial<LineItem>) {
+    setLineItems(list => list.map((li, i) => (i === index ? { ...li, ...patch } : li)));
+  }
+
+  // Fixes the "Part Number not binding" issue: editing the part number re-runs
+  // catalog matching so the selected catalog item (and its cost) always tracks
+  // what is actually typed/extracted, instead of being silently ignored.
+  function onPartNumberChange(index: number, value: string) {
+    const matchedId = bestCatalogMatch(value, pdfFullText, activeCatalog);
+    setLineItems(list => list.map((li, i) => (i === index ? {
+      ...li,
+      partNumber: value,
+      catalogItemId: matchedId || li.catalogItemId
+    } : li)));
+  }
+
+  function onLineCatalogChange(index: number, id: string) {
+    const item = activeCatalog.find(c => c.id === id);
+    setLineItems(list => list.map((li, i) => (i === index ? {
+      ...li,
+      catalogItemId: id,
+      partNumber: item?.currentGenSku || li.partNumber,
+      unitCost: li.unitCost || item?.vendorMappings[0]?.unitCost || item?.clientListPrice || 0
+    } : li)));
+  }
+
+  function deleteLineItem(index: number) {
+    setLineItems(list => list.filter((_, i) => i !== index));
+    setSelectedRow(sel => (sel === index ? null : sel !== null && sel > index ? sel - 1 : sel));
+  }
+
+  function selectRow(index: number) {
+    setSelectedRow(sel => (sel === index ? null : index));
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -154,6 +285,7 @@ export default function PoImport() {
     setPdfError('');
     setIsExtracting(true);
     setPdfStep('extracting');
+    setSelectedRow(null);
 
     try {
       const [arrayBuffer, dataUrl] = await Promise.all([
@@ -167,56 +299,43 @@ export default function PoImport() {
       ]);
       setFileDataUrl(dataUrl);
 
-      let textResult = '';
+      let fullText = '', lines: string[] = [];
       try {
-        textResult = await extractTextFromPdf(arrayBuffer);
+        const extracted = await extractPdfLines(arrayBuffer);
+        fullText = extracted.fullText;
+        lines = extracted.lines;
       } catch (err) {
-        console.warn('PDF stream extraction fallback:', err);
+        console.warn('PDF text extraction failed:', err);
       }
+      setPdfFullText(fullText);
 
-      const t = textResult.replace(/\s+/g, ' ');
+      const headerFields = parseHeaderFields(lines, fullText);
+      const rawItems = parseLineItems(lines);
 
-      // Extraction with fallback for Sample PO
-      let cName = 'Cognizant Technology Solution France SA';
-      let pNum = 'C11183-R1';
-      let catRaw = 'FN4FC';
-      let qty = 2;
-      let uCost = 230;
-      let supplier = 'VMV CUBE INFOTECH FZCO';
+      const items: LineItem[] = (rawItems.length ? rawItems : [EMPTY_LINE_ITEM]).map(item => ({
+        ...item,
+        catalogItemId: bestCatalogMatch(`${item.partNumber} ${item.description}`, fullText, activeCatalog) || ''
+      }));
 
-      if (!t.includes('C11183') && !file.name.includes('Sample PO')) {
-        const poMatch = t.match(/ORDER\s*NO\.?\s*([A-Z0-9-]+)/i) || t.match(/Order\s*([A-Z0-9-]+)/i);
-        if (poMatch) pNum = poMatch[1].trim();
-
-        const custMatch = t.match(/BILL\s*TO:[\s\S]*?(Cognizant[^\n\r,]+)/i);
-        if (custMatch) cName = custMatch[1].trim();
-
-        const suppMatch = t.match(/SUPPLIER:\s*([A-Z0-9\s]+?)(?=IFZA|SHIP TO|Phone:)/i);
-        if (suppMatch) supplier = suppMatch[1].trim();
-
-        const qtyMatch = t.match(/\|\s*(\d+)\s*(?:each)?\s*\|\s*Thursday/i);
-        if (qtyMatch) qty = parseInt(qtyMatch[1], 10) || 1;
-
-        const priceMatch = t.match(/\$([0-9.]+)\s*USD/i);
-        if (priceMatch) uCost = parseFloat(priceMatch[1]) || 0;
-      }
-
-      const matchedId = bestCatalogMatch(catRaw || t, t, activeCatalog);
-
-      setExtractedData({
-        clientName: cName,
-        poNumber: pNum,
-        catalogItem: catRaw,
-        catalogItemId: matchedId || activeCatalog[0]?.id || '',
-        quantity: qty,
-        unitCost: uCost,
-        supplier: supplier,
+      setHeader({
+        clientName: headerFields.clientName || '',
+        poNumber: headerFields.poNumber || '',
+        supplier: headerFields.supplier || '',
+        shipment: headerFields.shipment || '',
+        country: headerFields.country || '',
+        state: headerFields.state || '',
+        city: headerFields.city || '',
         notes: `Imported from PDF: ${file.name}`
       });
-
+      setLineItems(items);
       setPdfStep('review');
+
+      if (!rawItems.length) {
+        setPdfError('Could not automatically detect line items in this PDF — please enter them manually below.');
+      }
     } catch (err) {
       setPdfError('Failed to extract data from PDF. Manual review required.');
+      setLineItems([EMPTY_LINE_ITEM]);
       setPdfStep('review');
     } finally {
       setIsExtracting(false);
@@ -251,28 +370,42 @@ export default function PoImport() {
       setPdfError('Please upload a PDF before submitting.');
       return;
     }
+    if (!lineItems.length) {
+      setPdfError('Add at least one line item before saving.');
+      return;
+    }
 
-    const matchedCatalog = activeCatalog.find(c => c.id === extractedData.catalogItemId) || activeCatalog[0];
-
-    // Creates the purchase order and adds it to the Customer PO list table
-    intakePO({
-      clientName: extractedData.clientName.trim() || 'PDF Import Client',
-      poNumber: extractedData.poNumber.trim() || fileName?.replace(/\.[^/.]+$/, '') || 'PDF-IMPORT',
-      source: 'PDF_IMPORT',
-      fileName,
-      fileDataUrl,
-      catalogItemId: matchedCatalog?.id ?? '',
-      quantity: Number(extractedData.quantity) || 1,
-      unitCost: Number(extractedData.unitCost) || matchedCatalog?.clientListPrice || 0,
-      notes: extractedData.notes.trim()
+    // Every extracted line item is saved as its own Purchase Order record,
+    // sharing the common header details, so all of them appear directly in
+    // the Customer PO list table.
+    lineItems.forEach(li => {
+      const matchedCatalog = activeCatalog.find(c => c.id === li.catalogItemId) || activeCatalog[0];
+      intakePO({
+        clientName: header.clientName.trim() || 'PDF Import Client',
+        poNumber: header.poNumber.trim() || fileName?.replace(/\.[^/.]+$/, '') || 'PDF-IMPORT',
+        source: 'PDF_IMPORT',
+        fileName,
+        fileDataUrl,
+        catalogItemId: matchedCatalog?.id ?? '',
+        partNumber: li.partNumber.trim() || undefined,
+        quantity: Number(li.quantity) || 1,
+        unitCost: Number(li.unitCost) || matchedCatalog?.clientListPrice || 0,
+        supplier: header.supplier.trim() || undefined,
+        shipment: header.shipment.trim() || undefined,
+        country: header.country || undefined,
+        state: header.state || undefined,
+        city: header.city || undefined,
+        notes: header.notes.trim()
+      });
     });
 
-    // Navigates directly back to the PO list table
     navigate('/po');
   }
 
+  const fieldsLocked = selectedRow !== null;
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6">
       <div>
         <Link to="/po" className="text-sm font-medium text-slate-500 hover:text-brand-600">← Back to Customer POs</Link>
         <h1 className="mt-1 text-2xl font-bold text-slate-900">Customer PO Intake</h1>
@@ -346,69 +479,216 @@ export default function PoImport() {
           )}
 
           {pdfStep === 'review' && (
-            <div className="p-5 space-y-4 border rounded-xl border-emerald-200 bg-emerald-50/50">
-              <p className="text-xs font-bold tracking-wider uppercase text-emerald-800">Review / Edit Extracted Details</p>
+            <div className="p-5 space-y-5 border rounded-xl border-emerald-200 bg-emerald-50/50">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold tracking-wider uppercase text-emerald-800">Review / Edit Extracted Details</p>
+                {fieldsLocked && <p className="text-[11px] font-semibold text-amber-700">Header fields locked while editing a line item — click the row again to unlock.</p>}
+              </div>
+
               <div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2 md:grid-cols-3">
                 <div>
                   <label className="block mb-1 font-semibold text-slate-600">Customer / Client Name</label>
                   <input
-                    className="w-full p-2 bg-white border rounded-lg border-slate-200"
-                    value={extractedData.clientName}
-                    onChange={e => setExtractedData({ ...extractedData, clientName: e.target.value })}
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    value={header.clientName}
+                    disabled={fieldsLocked}
+                    onChange={e => updateHeader({ clientName: e.target.value })}
                   />
                 </div>
                 <div>
                   <label className="block mb-1 font-semibold text-slate-600">Customer PO Number</label>
                   <input
-                    className="w-full p-2 bg-white border rounded-lg border-slate-200"
-                    value={extractedData.poNumber}
-                    onChange={e => setExtractedData({ ...extractedData, poNumber: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-semibold text-slate-600">Catalog Item SKU / Part</label>
-                  <input
-                    className="w-full p-2 bg-white border rounded-lg border-slate-200"
-                    value={extractedData.catalogItem}
-                    onChange={e => setExtractedData({ ...extractedData, catalogItem: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-semibold text-slate-600">Quantity</label>
-                  <input
-                    type="number"
-                    className="w-full p-2 bg-white border rounded-lg border-slate-200"
-                    value={extractedData.quantity}
-                    onChange={e => setExtractedData({ ...extractedData, quantity: Number(e.target.value) })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1 font-semibold text-slate-600">Unit Cost ($ USD)</label>
-                  <input
-                    type="number"
-                    className="w-full p-2 bg-white border rounded-lg border-slate-200"
-                    value={extractedData.unitCost}
-                    onChange={e => setExtractedData({ ...extractedData, unitCost: Number(e.target.value) })}
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    value={header.poNumber}
+                    disabled={fieldsLocked}
+                    onChange={e => updateHeader({ poNumber: e.target.value })}
                   />
                 </div>
                 <div>
                   <label className="block mb-1 font-semibold text-slate-600">Supplier</label>
                   <input
-                    className="w-full p-2 bg-white border rounded-lg border-slate-200"
-                    value={extractedData.supplier}
-                    onChange={e => setExtractedData({ ...extractedData, supplier: e.target.value })}
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    value={header.supplier}
+                    disabled={fieldsLocked}
+                    onChange={e => updateHeader({ supplier: e.target.value })}
                   />
+                </div>
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-600">Shipment</label>
+                  <input
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    placeholder="e.g. Air Freight, Courier, Ground"
+                    value={header.shipment}
+                    disabled={fieldsLocked}
+                    onChange={e => updateHeader({ shipment: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-600">Country</label>
+                  <select
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    value={header.country}
+                    disabled={fieldsLocked}
+                    onChange={e => onCountryChange(e.target.value)}
+                  >
+                    <option value="">Select country...</option>
+                    {COUNTRY_NAMES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-600">State / Region</label>
+                  <select
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    value={header.state}
+                    disabled={fieldsLocked || !header.country}
+                    onChange={e => onStateChange(e.target.value)}
+                  >
+                    <option value="">Select state...</option>
+                    {stateOptions.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 font-semibold text-slate-600">City</label>
+                  <select
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    value={header.city}
+                    disabled={fieldsLocked || !header.state}
+                    onChange={e => updateHeader({ city: e.target.value })}
+                  >
+                    <option value="">Select city...</option>
+                    {cityOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
                 </div>
                 <div className="col-span-full">
                   <label className="block mb-1 font-semibold text-slate-600">Notes</label>
                   <textarea
                     rows={2}
-                    className="w-full p-2 bg-white border rounded-lg border-slate-200"
-                    value={extractedData.notes}
-                    onChange={e => setExtractedData({ ...extractedData, notes: e.target.value })}
+                    className="w-full p-2 bg-white border rounded-lg border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                    value={header.notes}
+                    disabled={fieldsLocked}
+                    onChange={e => updateHeader({ notes: e.target.value })}
                   />
                 </div>
               </div>
+
+              {/* Import table — all detected line items from the PDF */}
+              <div>
+                <p className="mb-2 text-xs font-bold tracking-wider uppercase text-emerald-800">Line Items ({lineItems.length})</p>
+                <div className="overflow-x-auto border rounded-lg border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="px-2 py-2 text-left text-slate-500">Part Number</th>
+                        <th className="px-2 py-2 text-left text-slate-500">Description</th>
+                        <th className="px-2 py-2 text-left text-slate-500">Catalog Match</th>
+                        <th className="px-2 py-2 text-right text-slate-500">Qty</th>
+                        <th className="px-2 py-2 text-right text-slate-500">Unit Cost</th>
+                        <th className="px-2 py-2 text-right text-slate-500">Total</th>
+                        <th className="px-2 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lineItems.map((li, i) => {
+                        const matched = activeCatalog.find(c => c.id === li.catalogItemId);
+                        const isSelected = selectedRow === i;
+                        return (
+                          <tr
+                            key={i}
+                            onClick={() => selectRow(i)}
+                            className={`cursor-pointer border-t border-slate-100 ${isSelected ? 'bg-indigo-50' : 'bg-white hover:bg-slate-50'}`}
+                          >
+                            <td className="px-2 py-2 font-medium text-slate-700">{li.partNumber || <span className="text-slate-400">—</span>}</td>
+                            <td className="px-2 py-2 text-slate-600 max-w-[220px] truncate">{li.description || <span className="text-slate-400">—</span>}</td>
+                            <td className="px-2 py-2 text-slate-600">{matched ? matched.currentGenModel : <span className="text-rose-500">No match</span>}</td>
+                            <td className="px-2 py-2 text-right text-slate-700">{li.quantity}</td>
+                            <td className="px-2 py-2 text-right text-slate-700">${li.unitCost.toLocaleString()}</td>
+                            <td className="px-2 py-2 text-right font-semibold text-slate-800">${(li.quantity * li.unitCost).toLocaleString()}</td>
+                            <td className="px-2 py-2 text-right">
+                              <button
+                                onClick={e => { e.stopPropagation(); deleteLineItem(i); }}
+                                className="font-bold text-slate-400 hover:text-rose-600"
+                                title="Delete line item"
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!lineItems.length && (
+                        <tr><td colSpan={7} className="px-2 py-4 text-center text-slate-400">No line items — upload a PDF to extract them.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Editable fields for the currently-selected import row only */}
+              {selectedRow !== null && lineItems[selectedRow] && (
+                <div className="p-4 space-y-3 bg-white border rounded-lg border-indigo-200">
+                  <p className="text-xs font-bold tracking-wider uppercase text-indigo-700">Editing Line Item {selectedRow + 1}</p>
+                  <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 md:grid-cols-3">
+                    <div>
+                      <label className="block mb-1 font-semibold text-slate-600">Part Number</label>
+                      <input
+                        className="w-full p-2 border rounded-lg border-slate-200"
+                        value={lineItems[selectedRow].partNumber}
+                        onChange={e => onPartNumberChange(selectedRow, e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-semibold text-slate-600">Catalog Item</label>
+                      <select
+                        className="w-full p-2 border rounded-lg border-slate-200"
+                        value={lineItems[selectedRow].catalogItemId}
+                        onChange={e => onLineCatalogChange(selectedRow, e.target.value)}
+                      >
+                        <option value="">No match — select manually...</option>
+                        {catalogGroups.map(grp => (
+                          <optgroup key={grp.label} label={grp.label}>
+                            {grp.items.map(item => (
+                              <option key={item.id} value={item.id}>{item.currentGenModel} — {item.currentGenSku}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-semibold text-slate-600">Description</label>
+                      <input
+                        className="w-full p-2 border rounded-lg border-slate-200"
+                        value={lineItems[selectedRow].description}
+                        onChange={e => updateLineItem(selectedRow, { description: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-semibold text-slate-600">Quantity</label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="w-full p-2 border rounded-lg border-slate-200"
+                        value={lineItems[selectedRow].quantity}
+                        onChange={e => updateLineItem(selectedRow, { quantity: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-semibold text-slate-600">Unit Cost ($ USD)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="w-full p-2 border rounded-lg border-slate-200"
+                        value={lineItems[selectedRow].unitCost}
+                        onChange={e => updateLineItem(selectedRow, { unitCost: Number(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button onClick={() => setSelectedRow(null)} className="px-3 py-1.5 text-xs font-semibold rounded-lg text-indigo-700 hover:bg-indigo-50">
+                      Done editing row
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -421,10 +701,10 @@ export default function PoImport() {
             </Link>
             <button
               onClick={submitPdf}
-              disabled={!fileDataUrl || isExtracting}
+              disabled={!fileDataUrl || isExtracting || !lineItems.length}
               className="px-5 py-2.5 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
-             Save Customer Purchase Order
+             Save Purchase Order
             </button>
           </div>
         </div>

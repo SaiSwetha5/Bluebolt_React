@@ -5,6 +5,12 @@ import type {
   VendorName, ShipmentStatus, PrStatus, ModelCategory, PrNotification, ServiceClass, ReportingHierarchy
 } from '../types/models';
 import { PROCUREMENT_MAILBOX } from '../types/models';
+// --- Continuation modules: DaaS Receivables & Account Management (additive) ---
+import type {
+  CustomerSubscription, ReceivableInvoice, Receipt,
+  AppUser, SystemRole, VendorAccount, CustomerAccount, SsoProvider,
+} from '../types/models';
+import { calculateOperatingLease } from '../utils/leaseCalculator';
 
 function pad(n: number, len = 5): string { return n.toString().padStart(len, '0'); }
 
@@ -62,8 +68,24 @@ export interface DataContextValue {
   assignAsset: (assetId: string, user: string, location: string) => void;
   retireAsset: (assetId: string) => void;
   upsertCatalogItem: (item: CatalogItem, isNew: boolean) => void;
- 
 
+  // --- DaaS Receivables ---
+  customerSubscriptions: CustomerSubscription[];
+  receivableInvoices: ReceivableInvoice[];
+  receipts: Receipt[];
+  createCustomerSubscription: (input: { customerAccountId: string; customerName: string; assetId: string; catalogItemId: string; serviceClass: CustomerSubscription['serviceClass']; assetCost: number; annualInterestRatePct: number; termYears: number; residualValue: number; startDate: string; billingDay: number }) => CustomerSubscription;
+  generateReceivableInvoice: (subscriptionId: string) => ReceivableInvoice | null;
+  recordReceipt: (invoiceId: string, method: Receipt['method'], reference: string) => Receipt | null;
+
+  // --- Account Management ---
+  users: AppUser[];
+  vendorAccounts: VendorAccount[];
+  customerAccounts: CustomerAccount[];
+  createUser: (input: { name: string; email: string; role: SystemRole; ssoProvider: SsoProvider }) => AppUser;
+  updateUserRole: (userId: string, role: SystemRole) => void;
+  toggleUserStatus: (userId: string) => void;
+  createVendorAccount: (input: Omit<VendorAccount, 'id' | 'status'>) => VendorAccount;
+  createCustomerAccount: (input: Omit<CustomerAccount, 'id' | 'status'>) => CustomerAccount;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -87,6 +109,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [notifications, setNotifications] = useState<PrNotification[]>([]);
 
+  // --- Continuation modules: DaaS Receivables & Account Management state ---
+  const counters2 = useRef({ sub: 1, rinv: 1, rcpt: 1, usr: 1, vac: 1, cac: 1 });
+  const [customerSubscriptions, setSubs] = useState<CustomerSubscription[]>([]);
+  const [receivableInvoices, setRInvoices] = useState<ReceivableInvoice[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [vendorAccounts, setVendorAccounts] = useState<VendorAccount[]>([]);
+  const [customerAccounts, setCustomerAccounts] = useState<CustomerAccount[]>([]);
+  const subsRef = useRef<CustomerSubscription[]>([]);
+  const rInvoicesRef = useRef<ReceivableInvoice[]>([]);
+  const setSubs2 = (fn: (l: CustomerSubscription[]) => CustomerSubscription[]) => { const n = fn(subsRef.current); subsRef.current = n; setSubs(n); };
+  const setRInvoices2 = (fn: (l: ReceivableInvoice[]) => ReceivableInvoice[]) => { const n = fn(rInvoicesRef.current); rInvoicesRef.current = n; setRInvoices(n); };
+
   // refs to avoid stale closures in seed
   const posRef = useRef<PurchaseOrder[]>([]);
   const prsRef = useRef<PurchaseRequisition[]>([]);
@@ -107,6 +142,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     auditRef.current = [entry, ...auditRef.current];
     setAuditLog([...auditRef.current]);
   }, []);
+
+  // Generic logger for the continuation modules (Receivables / Account Management),
+  // which introduce their own action/entity vocabulary without widening the
+  // original AuditAction/entityType unions used by the protected modules.
+  const logEvent = useCallback((action: string, entityType: string, entityId: string, details: string, actor = 'system') => {
+    logAudit(action as AuditAction, entityType as AuditLogEntry['entityType'], entityId, details, actor);
+  }, [logAudit]);
 
   const pushNotification = useCallback((n: Omit<PrNotification,'id'|'timestamp'|'read'>) => {
     const notif: PrNotification = { ...n, id: 'NOTIF-' + pad(counters.current.notif++), timestamp: new Date().toISOString(), read: false };
@@ -322,6 +364,81 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     logAudit(isNew ? 'CATALOG_ITEM_CREATED' : 'CATALOG_ITEM_UPDATED', 'Catalog', item.id, item.name);
   }, [logAudit]);
 
+  // --- DaaS Receivables: Customer Uses Device → Generate Invoice → Receive Payment ---
+  const createCustomerSubscription = useCallback((input: { customerAccountId: string; customerName: string; assetId: string; catalogItemId: string; serviceClass: CustomerSubscription['serviceClass']; assetCost: number; annualInterestRatePct: number; termYears: number; residualValue: number; startDate: string; billingDay: number }): CustomerSubscription => {
+    const calc = calculateOperatingLease({ assetCost: input.assetCost, annualInterestRatePct: input.annualInterestRatePct, termYears: input.termYears, startDate: input.startDate, residualValue: input.residualValue });
+    const endDate = calc.schedule.length ? calc.schedule[calc.schedule.length - 1].paymentDate : input.startDate;
+    const sub: CustomerSubscription = {
+      id: 'SUB-2026-' + pad(counters2.current.sub++, 4), customerAccountId: input.customerAccountId, customerName: input.customerName,
+      assetId: input.assetId, catalogItemId: input.catalogItemId, serviceClass: input.serviceClass,
+      assetCost: input.assetCost, annualInterestRatePct: input.annualInterestRatePct, termMonths: calc.numberOfPayments,
+      residualValue: input.residualValue, monthlyPayment: calc.monthlyPayment, startDate: input.startDate, endDate,
+      billingDay: input.billingDay, status: 'ACTIVE', nextInvoicePeriod: 1, createdAt: new Date().toISOString(),
+    };
+    setSubs2(l => [sub, ...l]);
+    setAssets2(l => l.map(a => a.assetId === input.assetId ? { ...a, leaseStartDate: sub.startDate, leaseEndDate: sub.endDate, contract: sub.id } : a));
+    logEvent('SUBSCRIPTION_CREATED', 'Subscription', sub.id, `DaaS subscription ${sub.id} created for ${sub.customerName}: ${sub.termMonths} mo @ $${sub.monthlyPayment}/mo (asset ${sub.assetId}).`);
+    return sub;
+  }, [logAudit]);
+
+  const generateReceivableInvoice = useCallback((subscriptionId: string): ReceivableInvoice | null => {
+    const sub = subsRef.current.find(s => s.id === subscriptionId);
+    if (!sub || sub.nextInvoicePeriod > sub.termMonths) return null;
+    const period = sub.nextInvoicePeriod;
+    const issueDate = new Date().toISOString().slice(0, 10);
+    const due = new Date(issueDate); due.setDate(due.getDate() + 15);
+    const inv: ReceivableInvoice = {
+      id: 'RINV-' + pad(counters2.current.rinv++, 5), subscriptionId: sub.id, customerName: sub.customerName,
+      period, amount: sub.monthlyPayment, issueDate, dueDate: due.toISOString().slice(0, 10), status: 'SENT',
+    };
+    setRInvoices2(l => [inv, ...l]);
+    setSubs2(l => l.map(s => s.id === sub.id ? { ...s, nextInvoicePeriod: s.nextInvoicePeriod + 1 } : s));
+    logEvent('RECEIVABLE_INVOICE_GENERATED', 'ReceivableInvoice', inv.id, `Receivable invoice ${inv.id} generated for ${sub.customerName}, period ${period}/${sub.termMonths}: $${inv.amount}.`);
+    return inv;
+  }, [logAudit]);
+
+  const recordReceipt = useCallback((invoiceId: string, method: Receipt['method'], reference: string): Receipt | null => {
+    const inv = rInvoicesRef.current.find(i => i.id === invoiceId);
+    if (!inv) return null;
+    const receipt: Receipt = { id: 'RCPT-' + pad(counters2.current.rcpt++, 5), invoiceId, subscriptionId: inv.subscriptionId, amount: inv.amount, receivedAt: new Date().toISOString(), method, reference };
+    setReceipts(l => [receipt, ...l]);
+    setRInvoices2(l => l.map(i => i.id === invoiceId ? { ...i, status: 'PAID', receiptId: receipt.id } : i));
+    logEvent('RECEIPT_RECORDED', 'Receipt', receipt.id, `Payment received against ${invoiceId}: $${receipt.amount} via ${method} (ref ${reference}).`);
+    return receipt;
+  }, [logAudit]);
+
+  // --- Account Management: Users, Roles, Vendor & Customer Accounts ---
+  const createUser = useCallback((input: { name: string; email: string; role: SystemRole; ssoProvider: SsoProvider }): AppUser => {
+    const user: AppUser = { id: 'USR-' + pad(counters2.current.usr++, 4), ...input, status: 'ACTIVE', createdAt: new Date().toISOString() };
+    setUsers(l => [user, ...l]);
+    logEvent('USER_CREATED', 'User', user.id, `User ${user.name} (${user.email}) created with role ${user.role}.`);
+    return user;
+  }, [logAudit]);
+
+  const updateUserRole = useCallback((userId: string, role: SystemRole) => {
+    setUsers(l => l.map(u => u.id === userId ? { ...u, role } : u));
+    logEvent('USER_ROLE_UPDATED', 'User', userId, `Role updated to ${role}.`);
+  }, [logAudit]);
+
+  const toggleUserStatus = useCallback((userId: string) => {
+    setUsers(l => l.map(u => u.id === userId ? { ...u, status: u.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' } : u));
+    logEvent('USER_STATUS_TOGGLED', 'User', userId, 'User status toggled.');
+  }, [logAudit]);
+
+  const createVendorAccount = useCallback((input: Omit<VendorAccount, 'id' | 'status'>): VendorAccount => {
+    const va: VendorAccount = { id: 'VAC-' + pad(counters2.current.vac++, 3), ...input, status: 'ACTIVE' };
+    setVendorAccounts(l => [va, ...l]);
+    logEvent('VENDOR_ACCOUNT_CREATED', 'VendorAccount', va.id, `Vendor account ${va.name} created (${va.contractRef}).`);
+    return va;
+  }, [logAudit]);
+
+  const createCustomerAccount = useCallback((input: Omit<CustomerAccount, 'id' | 'status'>): CustomerAccount => {
+    const ca: CustomerAccount = { id: 'CAC-' + pad(counters2.current.cac++, 3), ...input, status: 'ACTIVE' };
+    setCustomerAccounts(l => [ca, ...l]);
+    logEvent('CUSTOMER_ACCOUNT_CREATED', 'CustomerAccount', ca.id, `Customer account ${ca.name} created.`);
+    return ca;
+  }, [logAudit]);
+
   // Seed
   useEffect(() => {
     function intakePOSeed(input: Omit<PurchaseOrder,'id'|'status'|'submittedAt'>): PurchaseOrder {
@@ -431,6 +548,56 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const pr5: PurchaseRequisition = { id:'PR-2026-' + pad(counters.current.pr++), poId:po5.id, requestId:po5.requestId!, catalogItemId:'CAT-14STD', requestedQty:25, inStockQty:inStockQty5, onOrderQty:0, balanceQty:Math.max(25-inStockQty5,0), preferredVendor:'Dell', estimatedUnitCost:1585, estimatedTotalCost:Math.max(25-inStockQty5,0)*1585, costCenter:'CC-FIN-02', justification:'Finance team annual device refresh.', requestedBy:'R. Nair', requestedAt:new Date().toISOString(), status:'PENDING_APPROVAL', emailedTo:'a.subramanian@cognizant.com', emailedAt:new Date().toISOString(), approvalNotificationSentTo:PROCUREMENT_MAILBOX, approvalNotificationSentAt:new Date().toISOString() };
     prsRef.current = [pr5, ...prsRef.current]; setPRs([...prsRef.current]);
 
+    // --- Continuation modules seed data ---
+    // Account Management: users, roles are seeded via RoleDefinition constants in the Accounts pages.
+    const seedUsers: AppUser[] = [
+      { id:'USR-0001', name:'A. Subramanian', email:'a.subramanian@cognizant.com', role:'Admin', status:'ACTIVE', ssoProvider:'Azure AD', createdAt:'2026-01-05T00:00:00.000Z', lastLogin:'2026-09-05T09:12:00.000Z' },
+      { id:'USR-0002', name:'S. Krishnamurthy', email:'s.krishnamurthy@cognizant.com', role:'Procurement Manager', status:'ACTIVE', ssoProvider:'Azure AD', createdAt:'2026-01-10T00:00:00.000Z', lastLogin:'2026-09-04T14:30:00.000Z' },
+      { id:'USR-0003', name:'R. Nair', email:'r.nair@cognizant.com', role:'Finance Approver', status:'ACTIVE', ssoProvider:'Okta', createdAt:'2026-02-01T00:00:00.000Z', lastLogin:'2026-09-05T08:00:00.000Z' },
+      { id:'USR-0004', name:'S. Iyer', email:'s.iyer@cognizant.com', role:'Warehouse Ops', status:'ACTIVE', ssoProvider:'Azure AD', createdAt:'2026-02-15T00:00:00.000Z' },
+      { id:'USR-0005', name:'M. Fernandez', email:'m.fernandez@meridianfg.com', role:'Customer Success', status:'ACTIVE', ssoProvider:'Google Workspace', createdAt:'2026-03-01T00:00:00.000Z' },
+    ];
+    counters2.current.usr = 6;
+    setUsers(seedUsers);
+
+    const seedVendorAccounts: VendorAccount[] = [
+      { id:'VAC-001', name:'HP', contactName:'J. Turner', contactEmail:'j.turner@hp.com', contractRef:'MSA-HP-2024-118', paymentTerms:'Net 30', status:'ACTIVE' },
+      { id:'VAC-002', name:'Dell', contactName:'K. Ahuja', contactEmail:'k.ahuja@dell.com', contractRef:'MSA-DELL-2023-092', paymentTerms:'Net 30', status:'ACTIVE' },
+      { id:'VAC-003', name:'Lenovo', contactName:'P. Wong', contactEmail:'p.wong@lenovo.com', contractRef:'MSA-LNV-2024-045', paymentTerms:'Net 45', status:'ACTIVE' },
+    ];
+    counters2.current.vac = 4;
+    setVendorAccounts(seedVendorAccounts);
+
+    const seedCustomerAccounts: CustomerAccount[] = [
+      { id:'CAC-001', name:'Meridian Financial Group', region:'APAC', billingContact:'M. Fernandez', billingEmail:'billing@meridianfg.com', status:'ACTIVE', creditTermDays:30 },
+    ];
+    counters2.current.cac = 2;
+    setCustomerAccounts(seedCustomerAccounts);
+
+    // DaaS Receivables: one active subscription against a deployed asset, with one invoice already paid.
+    const deployedAsset = assetsRef.current.find(a => a.lifecycleStatus === 'DEPLOYED');
+    if (deployedAsset) {
+      const subCalc = calculateOperatingLease({ assetCost: 1540, annualInterestRatePct: 7, termYears: 3, startDate: '2026-06-01', residualValue: 200 });
+      const seedSub: CustomerSubscription = {
+        id:'SUB-2026-0001', customerAccountId:'CAC-001', customerName:'Meridian Financial Group',
+        assetId: deployedAsset.assetId, catalogItemId: deployedAsset.catalogItemId, serviceClass:'DaaS Standard',
+        assetCost:1540, annualInterestRatePct:7, termMonths:subCalc.numberOfPayments, residualValue:200,
+        monthlyPayment:subCalc.monthlyPayment, startDate:'2026-06-01',
+        endDate: subCalc.schedule[subCalc.schedule.length - 1].paymentDate, billingDay:1,
+        status:'ACTIVE', nextInvoicePeriod:2, createdAt:'2026-06-01T00:00:00.000Z',
+      };
+      subsRef.current = [seedSub]; setSubs([seedSub]);
+      counters2.current.sub = 2;
+
+      const seedInv: ReceivableInvoice = { id:'RINV-00001', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:1, amount:seedSub.monthlyPayment, issueDate:'2026-07-01', dueDate:'2026-07-16', status:'PAID', receiptId:'RCPT-00001' };
+      rInvoicesRef.current = [seedInv]; setRInvoices([seedInv]);
+      counters2.current.rinv = 2;
+
+      const seedReceipt: Receipt = { id:'RCPT-00001', invoiceId:seedInv.id, subscriptionId:seedSub.id, amount:seedInv.amount, receivedAt:'2026-07-10T00:00:00.000Z', method:'ACH', reference:'ACH-REF-88213' };
+      setReceipts([seedReceipt]);
+      counters2.current.rcpt = 2;
+    }
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -459,6 +626,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     createVendorOrder, submitVendorOrder, advanceVendorOrderStatus, addShipmentEvent,
     createGoodsReceipt, submitInvoice, approveInvoicePayment, markInvoicePaid, createLeaseSchedule,
     assignAsset, retireAsset, upsertCatalogItem,
+
+    // DaaS Receivables
+    customerSubscriptions, receivableInvoices, receipts,
+    createCustomerSubscription, generateReceivableInvoice, recordReceipt,
+
+    // Account Management
+    users, vendorAccounts, customerAccounts,
+    createUser, updateUserRole, toggleUserStatus, createVendorAccount, createCustomerAccount,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
