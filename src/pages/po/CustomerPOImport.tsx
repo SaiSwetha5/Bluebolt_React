@@ -1,737 +1,698 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../../store/DataContext';
+import { CUSTOMER_PO_MOCK } from '../../mocks/Customer_PO_MOCK';
 
-// Dynamically load PDF.js via CDN to avoid Vite/bundler worker issues
-const getPdfJs = (): Promise<any> => {
-  return new Promise((resolve, reject) => {
-    if ((window as any).pdfjsLib) {
-      resolve((window as any).pdfjsLib);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-    script.onload = () => resolve((window as any).pdfjsLib);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-};
+// --- Reusable Atomic Form Field Component ---
+interface FormFieldProps {
+  label: string;
+  value?: string | number | null;
+  placeholder?: string;
+  readOnly?: boolean;
+  className?: string;
+  isMono?: boolean;
+}
 
-export default function CustomerPOIntake() {
-  const navigate = useNavigate();
-  const { intakePO, catalog } = useData();
+export const FormField: React.FC<FormFieldProps> = ({
+  label,
+  value,
+  placeholder = '—',
+  readOnly = true,
+  className = '',
+  isMono = false,
+}) => (
+  <div className={`space-y-1 ${className}`}>
+    <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+      {label}
+    </label>
+    <input
+      type="text"
+      readOnly={readOnly}
+      value={value !== undefined && value !== null && value !== '' ? String(value) : ''}
+      placeholder={placeholder}
+      className={`w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
+        isMono ? 'font-mono' : ''
+      }`}
+    />
+  </div>
+);
 
-  const catalogOptions = [
-    'FN4FC',
-    'HP EliteBook 8 G1i 14 AI',
-    'HP EliteBook 8 G1i 16 AI',
-    'HP EliteBook Ultra G1i AI',
-    'HP EliteBook X Flip G1i AI',
-    'HP EliteDesk 8 G1i Mini',
-    'HP ZBook Fury G1i 16 O2O',
-    'HP ZBook Fury G1i 16, i7 265HX',
-    'HP Z2 Tower G1i',
-    'HP ZBook Fury G1i 16, i7 265HX (Ubuntu)',
-    'HP Z6 G5 W52545'
-  ];
+// --- Collapsible Accordion Section ---
+interface AccordionSectionProps {
+  title: string;
+  countBadge?: string | number;
+  isOpenDefault?: boolean;
+  accentColor?: string;
+  children: React.ReactNode;
+}
 
-  const emptyForm = {
-    customerName: '',
-    poNumber: '',
-    supplier: '',
-    shipment: 'Air Freight',
-    customerEntity: '',
-    entityCode: '',
-    partNumber: '',
-    catalog: '',
-    units: '',
-    perUnitCost: '',
-    billingMethod: 'Monthly',
-    country: '',
-    state: '',
-    city: '',
-    address1: '',
-    pincode: ''
-  };
-
-  const [form, setForm] = useState(emptyForm);
-  const [rows, setRows] = useState<any[]>([]);
-  const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [statusMsg, setStatusMsg] = useState('');
-  const [pdfFileName, setPdfFileName] = useState('');
-  const [additionalFiles, setAdditionalFiles] = useState<File[]>([]);
-
-  // PO Header & Address input handler
-  const handle = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
-
-  const handleAdditionalFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const selected = Array.from(e.target.files);
-      setAdditionalFiles((prev) => [...prev, ...selected]);
-    }
-  };
-
-  const removeAdditionalFile = (index: number) => {
-    setAdditionalFiles((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const findCatalogMatch = (part: string) => {
-    if (!part) return '';
-    const cleanPart = part.trim().toLowerCase();
-    const found = catalog.find(
-      (c) =>
-        c.id.toLowerCase() === cleanPart ||
-        c.name.toLowerCase().includes(cleanPart) ||
-        (c.currentGenSku && c.currentGenSku.toLowerCase() === cleanPart) ||
-        (c.currentGenModel && c.currentGenModel.toLowerCase().includes(cleanPart))
-    );
-    if (found) return found.name;
-    const option = catalogOptions.find((opt) => opt.toLowerCase().includes(cleanPart));
-    return option || part;
-  };
-
-  // Direct sync: editing the line item inputs instantly updates the selected row in the table
-  const handleLineItemChange = (name: string, value: string) => {
-    const updatedForm = { ...form, [name]: value };
-
-    if (name === 'partNumber') {
-      updatedForm.catalog = findCatalogMatch(value);
-    }
-
-    setForm(updatedForm);
-
-    if (selectedRowId !== null) {
-      setRows((prevRows) =>
-        prevRows.map((r) => {
-          if (r.id === selectedRowId) {
-            const u = name === 'units' ? value : r.units;
-            const p = name === 'perUnitCost' ? value : r.perUnitCost;
-            const total = (+u || 0) * (+p || 0);
-
-            return {
-              ...r,
-              [name]: value,
-              ...(name === 'partNumber' ? { catalog: findCatalogMatch(value) } : {}),
-              units: u,
-              perUnitCost: p,
-              totalCost: total
-            };
-          }
-          return r;
-        })
-      );
-    }
-  };
-
-  const extractDetails = (text: string, fileName: string) => {
-    const clean = text.replace(/\s+/g, ' ').trim();
-
-    if (clean.includes('C11183') || fileName.includes('Sample PO')) {
-      const partNumber = 'FN4FC';
-      return {
-        poNumber: 'C11183-R1',
-        customerName: 'Etix Everywhere zColo FRPALDEA03',
-        supplier: 'VMV CUBE INFOTECH FZCO',
-        shipment: 'Air Freight',
-        customerEntity: 'FRPALDEA03 : Ariane - PA FRA, COG',
-        entityCode: 'FRPALDEA03',
-        partNumber: partNumber,
-        catalog: findCatalogMatch(partNumber),
-        units: '7',
-        perUnitCost: '230.00',
-        billingMethod: 'Monthly',
-        country: 'France',
-        state: 'Île-de-France',
-        city: 'Puteaux',
-        address1: 'Cognizant Technology Solution France SA (US406) 5 Place de la Pyramide',
-        pincode: '92800'
-      };
-    }
-
-    const data: any = { ...emptyForm, units: '1', perUnitCost: '0.00', billingMethod: 'Monthly' };
-
-    const poMatch = clean.match(/ORDER\s*NO\.?\s*([A-Z0-9-]+)/i) || clean.match(/PO\s*(?:Number|#)?\s*:?\s*([A-Z0-9-]+)/i);
-    if (poMatch) data.poNumber = poMatch[1].trim();
-
-    const supplierMatch = clean.match(/SUPPLIER\s*:?\s*([A-Z0-9\s.,&-]+?)(?=\s+(?:Shipment|SHIP\s*TO|IFZA|Phone:|VAT|Tax|BILL\s*TO))/i);
-    if (supplierMatch) data.supplier = supplierMatch[1].replace(/sn$/i, '').trim();
-
-    const shipmentMatch = clean.match(/SHIPMENT\s*:?\s*([A-Za-z\s]+?)(?=\s+(?:Carrier|Terms|BILL\s*TO|Date))/i);
-    if (shipmentMatch) data.shipment = shipmentMatch[1].trim();
-
-    const customerMatch = clean.match(/BILL\s*TO\s*:?[\s\S]*?([A-Za-z0-9\s]+?(?:SA|Inc|LLC|Corp|GmbH|Limited|zColo[^\n,]+))/i);
-    if (customerMatch) data.customerName = customerMatch[1].trim();
-
-    const entityMatch = clean.match(/Entity(?:\s*Name)?\s*:?\s*([^:\n]+:[^:\n]+?)(?=\s*(?:Description|Address|Code))/i);
-    if (entityMatch) data.customerEntity = entityMatch[1].trim();
-
-    const codeMatch = clean.match(/(?:Entity\s*)?ID\s*:?\s*([A-Z0-9]+)/i);
-    if (codeMatch) data.entityCode = codeMatch[1].trim();
-
-    const partMatch = clean.match(/(?:Part\s*(?:Number|#|No\.)|Item\s*Code|SKU|Catalog)\s*:?\s*([A-Z0-9-_]+)/i);
-    if (partMatch) {
-      data.partNumber = partMatch[1].trim();
-      data.catalog = findCatalogMatch(data.partNumber);
-    } else {
-      const codeCatalogMatch = clean.match(/\b(FN4FC|C40DKEC|C3WY0EC|C61MVEC|C2ZK6EC|C41QWEC|C2EL5EC|DA3X7EC|C2LW9EC)\b/i);
-      if (codeCatalogMatch) {
-        data.partNumber = codeCatalogMatch[1].toUpperCase();
-        data.catalog = findCatalogMatch(data.partNumber);
-      }
-    }
-
-    const addrMatch = clean.match(/Address\s*:?\s*(.*?)(?=\s*City:)/i);
-    if (addrMatch) data.address1 = addrMatch[1].trim();
-
-    const cityMatch = clean.match(/City\s*:?\s*([A-Za-z\s-]+?)(?=\s*State:)/i);
-    if (cityMatch) data.city = cityMatch[1].trim();
-
-    const stateMatch = clean.match(/State\s*:?\s*([A-Za-z0-9\s-]+?)(?=\s*Postal:)/i);
-    if (stateMatch) data.state = stateMatch[1].trim();
-
-    const postalMatch = clean.match(/(?:Postal|Zip)(?:\s*Code)?\s*:?\s*([0-9A-Z]+)/i);
-    if (postalMatch) data.pincode = postalMatch[1].trim();
-
-    const qtyMatch = clean.match(/\|\s*(\d+)\s*(?:each)?\s*\|/i) || clean.match(/(?:Qty|Quantity|Units)\s*:?\s*(\d+)/i);
-    if (qtyMatch) data.units = qtyMatch[1].trim();
-
-    const priceMatch = clean.match(/\$([0-9.,]+)\s*USD/i) || clean.match(/(?:Unit\s*Price|Rate)\s*:?\s*\$?([0-9.,]+)/i);
-    if (priceMatch) data.perUnitCost = priceMatch[1].replace(/,/g, '').trim();
-
-    return data;
-  };
-
-  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) {
-      setForm(emptyForm);
-      setRows([]);
-      setSelectedRowId(null);
-      setStatusMsg('');
-      setPdfFileName('');
-      return;
-    }
-
-    setPdfFileName(file.name);
-    setLoading(true);
-    setStatusMsg('Reading PDF document...');
-
-    const reader = new FileReader();
-
-    reader.onload = async () => {
-      try {
-        const typedarray = new Uint8Array(reader.result as ArrayBuffer);
-        const pdfjs = await getPdfJs();
-
-        const loadingTask = pdfjs.getDocument({
-          data: typedarray,
-          disableFontFace: true,
-          nativeImageDecoderSupport: 'none',
-          useSystemFonts: true
-        });
-
-        const pdf = await loadingTask.promise;
-        let textResult = '';
-
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-          const page = await pdf.getPage(pageNum);
-          const content = await page.getTextContent();
-          textResult += ' ' + content.items.map((it: any) => it.str).join(' ');
-        }
-
-        const parsed = extractDetails(textResult, file.name);
-
-        setForm({
-          ...emptyForm,
-          poNumber: parsed.poNumber,
-          customerName: parsed.customerName,
-          supplier: parsed.supplier,
-          shipment: parsed.shipment,
-          country: parsed.country,
-          state: parsed.state,
-          city: parsed.city,
-          address1: parsed.address1,
-          pincode: parsed.pincode,
-          partNumber: parsed.partNumber || 'FN4FC',
-          catalog: parsed.catalog || findCatalogMatch(parsed.partNumber || 'FN4FC'),
-          customerEntity: parsed.customerEntity,
-          entityCode: parsed.entityCode,
-          units: parsed.units,
-          perUnitCost: parsed.perUnitCost,
-          billingMethod: parsed.billingMethod || 'Monthly'
-        });
-
-        const itemUnits = +parsed.units || 1;
-        const itemUnitPrice = +parsed.perUnitCost || 0;
-        const newRowId = Date.now();
-        const autoRow = {
-          id: newRowId,
-          partNumber: parsed.partNumber || 'FN4FC',
-          catalog: parsed.catalog || findCatalogMatch(parsed.partNumber || 'FN4FC'),
-          customerEntity: parsed.customerEntity,
-          entityCode: parsed.entityCode,
-          units: itemUnits,
-          perUnitCost: itemUnitPrice,
-          totalCost: itemUnits * itemUnitPrice,
-          billingMethod: parsed.billingMethod || 'Monthly'
-        };
-
-        setRows([autoRow]);
-        setSelectedRowId(newRowId);
-        setStatusMsg('Fields and line item extracted directly from PDF!');
-      } catch (err) {
-        console.warn('Fallback dynamic extractor triggered:', err);
-        setStatusMsg('Failed to parse document fully.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  const handleSelectRow = (row: any) => {
-    setSelectedRowId(row.id);
-    setForm((prev) => ({
-      ...prev,
-      partNumber: row.partNumber || '',
-      catalog: row.catalog || '',
-      customerEntity: row.customerEntity || '',
-      entityCode: row.entityCode || '',
-      units: row.units || '',
-      perUnitCost: row.perUnitCost || '',
-      billingMethod: row.billingMethod || 'Monthly'
-    }));
-  };
-
-  const handleDeleteRow = (id: number) => {
-    const nextRows = rows.filter((r) => r.id !== id);
-    setRows(nextRows);
-
-    if (selectedRowId === id) {
-      if (nextRows.length > 0) {
-        handleSelectRow(nextRows[0]);
-      } else {
-        setSelectedRowId(null);
-        setForm((prev) => ({
-          ...prev,
-          partNumber: '',
-          catalog: '',
-          customerEntity: '',
-          entityCode: '',
-          units: '',
-          perUnitCost: ''
-        }));
-      }
-    }
-  };
-
-  const handleSubmitPO = () => {
-    if (!form.poNumber || !form.customerName) {
-      alert('PO Number and Customer Name are required.');
-      return;
-    }
-    if (rows.length === 0) {
-      alert('No line items found. Please upload a PO PDF first.');
-      return;
-    }
-
-    const totalQuantity = rows.reduce((acc, row) => acc + (+row.units || 0), 0);
-    const grandTotal = rows.reduce((acc, row) => acc + (+row.totalCost || 0), 0);
-    const averageUnitCost = totalQuantity > 0 ? Math.round((grandTotal / totalQuantity) * 100) / 100 : 0;
-
-    const matchedCatalogItem = catalog.find((c) =>
-      rows.some(
-        (r) =>
-          (r.catalog && (c.name.toLowerCase().includes(r.catalog.toLowerCase()) || c.id === r.catalog)) ||
-          (r.partNumber && (c.currentGenSku?.toLowerCase() === r.partNumber.toLowerCase() || c.id.toLowerCase() === r.partNumber.toLowerCase()))
-      )
-    );
-    const resolvedCatalogItemId = matchedCatalogItem?.id || catalog[0]?.id || 'CAT-14STD';
-
-    intakePO({
-      clientName: form.customerName,
-      poNumber: form.poNumber,
-      source: pdfFileName ? 'PDF_IMPORT' : 'API',
-      fileName: pdfFileName || undefined,
-      catalogItemId: resolvedCatalogItemId,
-      quantity: totalQuantity,
-      unitCost: averageUnitCost,
-      notes: `Supplier: ${form.supplier || 'N/A'} | Shipment: ${form.shipment} | Items: ${rows.length}`
-    });
-
-    navigate('/po');
-  };
-
-  const totalUnits = rows.reduce((acc, row) => acc + (+row.units || 0), 0);
-  const grandTotal = rows.reduce((acc, row) => acc + (+row.totalCost || 0), 0);
-  const currentTotalCost = (+form.units || 0) * (+form.perUnitCost || 0);
+export const AccordionSection: React.FC<AccordionSectionProps> = ({
+  title,
+  countBadge,
+  isOpenDefault = false,
+  accentColor = 'bg-blue-600',
+  children,
+}) => {
+  const [isOpen, setIsOpen] = useState(isOpenDefault);
 
   return (
-    <div className='min-h-screen px-4 py-8 bg-slate-50 sm:px-6 lg:px-8'>
-      <div className='mx-auto space-y-6 max-w-7xl'>
-        
-        <div className='flex items-center justify-between p-6 bg-white border shadow-sm rounded-2xl border-slate-200'>
-          <div>
-            <h1 className='text-2xl font-bold text-slate-900'>Customer PO Intake</h1>
-            <p className='mt-1 text-sm text-slate-500'>Upload PDF document to populate and register purchase order.</p>
-          </div>
-          {statusMsg && (
-            <span
-              className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${
-                loading ? 'bg-indigo-50 border-indigo-200 text-indigo-700 animate-pulse' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              }`}
-            >
-              {statusMsg}
+    <div className="overflow-hidden transition-all bg-white border shadow-sm border-slate-200 rounded-xl">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full px-5 py-3.5 flex items-center justify-between bg-white hover:bg-slate-50/75 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2.5">
+          <span className={`w-2 h-2 rounded-full ${accentColor}`}></span>
+          <h3 className="text-xs font-bold tracking-wider uppercase text-slate-700">{title}</h3>
+          {countBadge !== undefined && (
+            <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full">
+              {countBadge}
             </span>
           )}
         </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-400 font-medium">{isOpen ? 'Hide Details' : 'View Details'}</span>
+          <svg
+            className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+      {isOpen && <div className="p-5 bg-white border-t border-slate-100">{children}</div>}
+    </div>
+  );
+};
 
-        <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
-          <div className='flex flex-col justify-between p-6 bg-white border shadow-sm rounded-2xl border-slate-200'>
-            <div>
-              <label className='block mb-1 text-sm font-semibold text-slate-700'>Upload Customer PO PDF</label>
-              <span className='block mb-3 text-xs text-slate-500'>
-                Upload your PO PDF document to automatically extract and populate all fields.
-              </span>
+// --- Interfaces ---
+export interface LineItem {
+  lineNo: number;
+  description: string;
+  fullDescription?: string;
+  partNumber: string;
+  catalogMatch?: string;
+  entityName?: string;
+  entityCode?: string;
+  quantity: number;
+  uom?: string;
+  unitPrice: number;
+  netAmount: number;
+  amount: number;
+  billingMethod?: string;
+}
+
+export default function CustomerPoUpload() {
+  const navigate = useNavigate();
+  const dataContext = useData();
+
+  // Extract handlers from context safely
+  const { intakePO, addCustomerPo, updateCustomerPo, catalog = [] } = dataContext || {};
+
+  // Upload & parse tracking
+  const [poFile, setPoFile] = useState<File | null>(null);
+  const [, setAdditionalFiles] = useState<FileList | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
+  const [isParsed, setIsParsed] = useState(false);
+
+  // 1. PO Header & Party metadata
+  const [poData, setPoData] = useState<any>({
+    orderNo: '',
+    customerName: '',
+    contractId: '',
+    revision: '',
+    issuedOn: '',
+    createdOn: '',
+    createdBy: '',
+    requester: '',
+    poEndDate: '',
+    totalAmount: 0,
+    currency: 'USD',
+    intakeStatus: 'AWAITING_UPLOAD',
+    shipment: 'Air Freight',
+    supplier: null,
+    shipTo: null,
+    billTo: null,
+    deliverTo: null,
+  });
+
+  // 2. Line items state
+  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState<number>(-1);
+
+  // Form State (Above Table)
+  const [editForm, setEditForm] = useState<Partial<LineItem>>({
+    partNumber: '',
+    catalogMatch: '',
+    entityName: '',
+    entityCode: '',
+    quantity: 1,
+    unitPrice: 0,
+    amount: 0,
+    billingMethod: 'Monthly',
+  });
+
+  // Handle PDF Upload & Trigger Extraction into form
+  const handlePdfUpload = (file: File) => {
+    setPoFile(file);
+    setIsParsing(true);
+
+    setTimeout(() => {
+      const mock = CUSTOMER_PO_MOCK.data;
+
+      setPoData({
+        orderNo: mock.orderNo,
+        contractId: mock.contractId,
+        revision: mock.revision,
+        issuedOn: mock.issuedOn,
+        createdOn: mock.createdOn,
+        createdBy: mock.createdBy,
+        requester: mock.requester,
+        poEndDate: mock.poEndDate,
+        totalAmount: mock.totalAmount,
+        currency: mock.currency,
+        intakeStatus: mock.intakeStatus,
+        customerName: mock.billTo?.company || 'Cognizant Technology Solution France SA (US406)',
+        shipment: 'Air Freight',
+        supplier: mock.supplier,
+        shipTo: mock.shipTo,
+        billTo: mock.billTo,
+        deliverTo: mock.deliverTo,
+      });
+
+      const parsedItems: LineItem[] = (mock.lineItems || []).map((item: any, idx: number) => ({
+        lineNo: item.lineNo || idx + 1,
+        description: item.description,
+        fullDescription: item.fullDescription,
+        partNumber: item.partNumber,
+        catalogMatch: item.partNumber,
+        entityName: mock.billTo?.name || 'FRPALDEA03 : Ariane - PA FRA, COG',
+        entityCode: mock.deliverTo?.locationCode?.id || 'FRPALDEA03',
+        quantity: item.quantity || 1,
+        uom: item.uom || 'each',
+        unitPrice: item.unitPrice || 0,
+        netAmount: item.netAmount || 0,
+        amount: item.amount || 0,
+        billingMethod: 'Monthly',
+      }));
+
+      setLineItems(parsedItems);
+      if (parsedItems.length > 0) {
+        setSelectedIdx(0);
+      }
+      setIsParsing(false);
+      setIsParsed(true);
+    }, 600);
+  };
+
+  useEffect(() => {
+    if (lineItems.length > 0 && selectedIdx >= 0 && selectedIdx < lineItems.length) {
+      const active = lineItems[selectedIdx];
+      setEditForm({
+        partNumber: active.partNumber,
+        catalogMatch: active.catalogMatch || active.partNumber,
+        entityName: active.entityName || '',
+        entityCode: active.entityCode || '',
+        quantity: active.quantity,
+        unitPrice: active.unitPrice,
+        amount: active.amount,
+        billingMethod: active.billingMethod || 'Monthly',
+      });
+    }
+  }, [selectedIdx, lineItems]);
+
+  const { totalUnits, grandTotal } = useMemo(() => {
+    const units = lineItems.reduce((acc, curr) => acc + (Number(curr.quantity) || 0), 0);
+    const sum = lineItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    return { totalUnits: units, grandTotal: sum };
+  }, [lineItems]);
+
+  const handleEditChange = (field: keyof LineItem, val: any) => {
+    if (selectedIdx < 0 || selectedIdx >= lineItems.length) return;
+
+    setLineItems((prev) => {
+      const updated = [...prev];
+      const current = { ...updated[selectedIdx], [field]: val };
+
+      if (field === 'quantity' || field === 'unitPrice') {
+        const qty = field === 'quantity' ? Number(val) || 0 : Number(current.quantity) || 0;
+        const price = field === 'unitPrice' ? Number(val) || 0 : Number(current.unitPrice) || 0;
+        current.quantity = qty;
+        current.unitPrice = price;
+        current.amount = qty * price;
+        current.netAmount = qty * price;
+      }
+
+      updated[selectedIdx] = current;
+      return updated;
+    });
+
+    setEditForm((prev) => {
+      const next = { ...prev, [field]: val };
+      if (field === 'quantity' || field === 'unitPrice') {
+        const qty = field === 'quantity' ? Number(val) || 0 : Number(next.quantity) || 0;
+        const price = field === 'unitPrice' ? Number(val) || 0 : Number(next.unitPrice) || 0;
+        next.amount = qty * price;
+      }
+      return next;
+    });
+  };
+
+  const handleAddNewItem = () => {
+    const newItem: LineItem = {
+      lineNo: lineItems.length + 1,
+      description: 'Peripheral / Equipment Bundle',
+      partNumber: 'FN4FC',
+      catalogMatch: 'FN4FC',
+      entityName: poData.billTo?.name || '',
+      entityCode: poData.deliverTo?.locationCode?.id || '',
+      quantity: 1,
+      unitPrice: 230,
+      netAmount: 230,
+      amount: 230,
+      billingMethod: 'Monthly',
+    };
+    const updated = [...lineItems, newItem];
+    setLineItems(updated);
+    setSelectedIdx(updated.length - 1);
+  };
+
+  const handleDeleteRow = (e: React.MouseEvent, indexToDelete: number) => {
+    e.stopPropagation();
+    if (lineItems.length === 1) {
+      alert('A purchase order requires at least one line item.');
+      return;
+    }
+    const updated = lineItems.filter((_, idx) => idx !== indexToDelete);
+    setLineItems(updated);
+    if (selectedIdx >= updated.length) {
+      setSelectedIdx(updated.length - 1);
+    }
+  };
+
+  // --- SAVE PURCHASE ORDER: Formatted to match PoList columns ---
+  const handleSavePo = () => {
+    if (!isParsed && lineItems.length === 0) {
+      alert('Please upload a PO PDF or configure line items before saving.');
+      return;
+    }
+
+    const firstItem = lineItems[0] || {};
+    const averageUnitCost = totalUnits > 0 ? Math.round((grandTotal / totalUnits) * 100) / 100 : 0;
+    const generatedId = `CPO-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    const city = poData.deliverTo?.locationCode?.city || poData.billTo?.city || poData.shipTo?.city || 'La Defense';
+    const state = poData.deliverTo?.locationCode?.state || poData.billTo?.state || 'PA';
+    const country = poData.deliverTo?.locationCode?.region || poData.billTo?.country || poData.shipTo?.country || 'France';
+
+    const matchedCatalogItem = catalog.find((c: any) =>
+      lineItems.some(
+        (r) =>
+          (r.catalogMatch && c.name?.toLowerCase().includes(r.catalogMatch.toLowerCase())) ||
+          (r.partNumber && c.currentGenSku?.toLowerCase() === r.partNumber.toLowerCase())
+      )
+    );
+
+    // Complete schema adhering to PoList and DataContext models
+    const unifiedPoRecord = {
+      id: generatedId,
+      poNumber: poData.orderNo || `PO-${Date.now().toString().slice(-6)}`,
+      clientName: poData.customerName || poData.billTo?.company || 'Cognizant Internal',
+      partNumber: firstItem.partNumber || 'FN4FC',
+      catalogItemId: matchedCatalogItem?.id || 'CAT-14STD',
+      source: poFile ? 'PDF_IMPORT' : 'API',
+      quantity: totalUnits,
+      unitCost: averageUnitCost,
+      totalAmount: grandTotal,
+      shipment: poData.shipment || 'Air Freight',
+      city,
+      state,
+      country,
+      status: 'RECEIVED',
+      submittedAt: new Date().toISOString(),
+      fileName: poFile ? poFile.name : undefined,
+      notes: `Supplier: ${poData.supplier?.name || 'N/A'} | Line Items: ${lineItems.length}`,
+      ...poData,
+      lineItems,
+    };
+
+    // Call store action
+    if (typeof intakePO === 'function') {
+      intakePO(unifiedPoRecord);
+    } else if (typeof addCustomerPo === 'function') {
+      addCustomerPo(unifiedPoRecord);
+    } else if (typeof updateCustomerPo === 'function') {
+      updateCustomerPo(unifiedPoRecord);
+    }
+
+    // Navigate to PO List to immediately view the table update
+    navigate('/po');
+  };
+
+  return (
+    <div className="pb-20 mx-auto space-y-6 max-w-7xl">
+      {/* 0. Top Upload Section */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
+          <h2 className="text-sm font-bold text-slate-800">Upload Customer PO PDF</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Upload your PO PDF document to parse and auto-populate all sections.
+          </p>
+          <div className="flex items-center gap-3 mt-3">
+            <label className="inline-flex items-center px-4 py-2 text-xs font-semibold text-white transition-colors bg-indigo-600 rounded-lg shadow-sm cursor-pointer hover:bg-indigo-700">
+              <span>{isParsing ? 'Parsing Document...' : 'Upload & Parse PDF'}</span>
               <input
-                type='file'
-                accept='.pdf'
-                onChange={handlePdfUpload}
-                className='block w-full text-sm cursor-pointer text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100'
+                type="file"
+                accept=".pdf"
+                className="hidden"
+                disabled={isParsing}
+                onChange={(e) => {
+                  if (e.target.files?.[0]) handlePdfUpload(e.target.files[0]);
+                }}
               />
-            </div>
-            <div className='flex items-center gap-2 pt-3 mt-4 text-xs border-t border-slate-100 text-slate-500'>
-              <span className='inline-block w-2 h-2 rounded-full bg-emerald-500'></span>
-              <span>Auto-fill engine enabled</span>
-            </div>
+            </label>
+            {isParsing && <span className="text-xs font-medium text-indigo-600 animate-pulse">Extracting data...</span>}
           </div>
+          <p className="mt-2 text-xs font-medium text-slate-500">
+            Attached:{' '}
+            <span className={poFile ? 'text-indigo-600 font-semibold' : 'text-slate-400'}>
+              {poFile ? poFile.name : 'No file chosen'}
+            </span>
+          </p>
+        </div>
 
-          <div className='flex flex-col justify-between p-6 bg-white border shadow-sm rounded-2xl border-slate-200'>
-            <div>
-              <label className='block mb-1 text-sm font-semibold text-slate-700'>Upload Additional Files</label>
-              <span className='block mb-3 text-xs text-slate-500'>Attach supporting documentation (.xlsx, .doc, .msg, .pdf).</span>
-              <input
-                type='file'
-                multiple
-                accept='.xlsx,.xls,.msg,.doc,.docx,.pdf'
-                onChange={handleAdditionalFiles}
-                className='block w-full text-sm cursor-pointer text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200'
-              />
+        <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
+          <h2 className="text-sm font-bold text-slate-800">Upload Additional Files</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Attach supporting documentation (.xlsx, .doc, .msg, .pdf).</p>
+          <div className="flex items-center gap-2 mt-3">
+        <input
+      type="file"
+      multiple
+      className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-500 cursor-not-allowed"
+      onChange={(e) => setAdditionalFiles(e.target.files)}
+    />
+          </div>
+        </div>
+      </div>
+
+      {/* 1. PO Header Details */}
+      <div className="p-5 space-y-3 bg-white border shadow-sm border-slate-200 rounded-xl">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+            <h3 className="text-xs font-bold tracking-wider uppercase text-slate-700">1. PO Header Details</h3>
+          </div>
+          <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
+            isParsed ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'
+          }`}>
+            Status: {poData.intakeStatus}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <FormField label="PO Order No" value={poData.orderNo} placeholder="e.g. C11183-R1" isMono />
+          <FormField label="Customer Name" value={poData.customerName} placeholder="Customer company" />
+          <FormField label="Contract ID" value={poData.contractId} placeholder="Contract ref" isMono />
+          <FormField label="Revision" value={poData.revision} placeholder="Rev #" isMono />
+          <FormField label="Issued On" value={poData.issuedOn ? new Date(poData.issuedOn).toLocaleDateString() : ''} placeholder="MM/DD/YYYY" />
+          <FormField label="Created On" value={poData.createdOn ? new Date(poData.createdOn).toLocaleDateString() : ''} placeholder="MM/DD/YYYY" />
+          <FormField label="Created By" value={poData.createdBy} placeholder="Created by user" />
+          <FormField label="Requester" value={poData.requester} placeholder="Requester name" />
+          <FormField label="PO End Date" value={poData.poEndDate ? new Date(poData.poEndDate).toLocaleDateString() : ''} placeholder="MM/DD/YYYY" />
+          <FormField label="Total Amount" value={isParsed || grandTotal > 0 ? `$${grandTotal.toFixed(2)}` : ''} placeholder="$0.00" isMono />
+          <FormField label="Currency" value={poData.currency} />
+          <FormField label="Shipment Mode" value={poData.shipment} placeholder="e.g. Air Freight" />
+        </div>
+      </div>
+
+      {/* 2. Collapsible Accordion Sections */}
+      <div className="space-y-3">
+        <AccordionSection title="Supplier Details" accentColor="bg-blue-600" isOpenDefault={false}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <FormField label="Supplier Name" value={poData.supplier?.name} />
+            <FormField label="Contact Phone" value={poData.supplier?.phone} />
+            <FormField label="Contact Email" value={poData.supplier?.contactEmail} />
+            <FormField label="Postal Code" value={poData.supplier?.postalCode} isMono />
+            <FormField label="Address Line 1" value={poData.supplier?.addressLine1} className="md:col-span-2" />
+            <FormField label="City" value={poData.supplier?.city} />
+            <FormField label="Country" value={poData.supplier?.country} />
+            <FormField label="Ordering Address" value={poData.supplier?.orderingAddress} className="md:col-span-4" />
+          </div>
+        </AccordionSection>
+
+        <AccordionSection title="Ship To Address" accentColor="bg-indigo-600" isOpenDefault={false}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <FormField label="Facility / Attention" value={poData.shipTo?.name} className="md:col-span-2" />
+            <FormField label="City" value={poData.shipTo?.city} />
+            <FormField label="Country" value={poData.shipTo?.country} />
+            <FormField label="Address Line 1" value={poData.shipTo?.addressLine1} className="md:col-span-4" />
+          </div>
+        </AccordionSection>
+
+        <AccordionSection title="Bill To Address & Entity" accentColor="bg-emerald-600" isOpenDefault={false}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <FormField label="Billing Entity / Contact" value={poData.billTo?.name} />
+            <FormField label="Company Name" value={poData.billTo?.company} className="md:col-span-2" />
+            <FormField label="Postal / ZIP Code" value={poData.billTo?.postalCode} isMono />
+            <FormField label="Address Line 1" value={poData.billTo?.addressLine1} className="md:col-span-2" />
+            <FormField label="City" value={poData.billTo?.city} />
+            <FormField label="State / Region" value={poData.billTo?.state} />
+            <FormField label="Country" value={poData.billTo?.country} />
+          </div>
+        </AccordionSection>
+
+        <AccordionSection title="Deliver To Details" accentColor="bg-purple-600" isOpenDefault={false}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+            <FormField label="Deliver To Email" value={poData.deliverTo?.email} />
+            <FormField label="GL Business Unit" value={poData.deliverTo?.glBusinessUnit} />
+            <FormField label="Asset Classification" value={poData.deliverTo?.asset} />
+            <FormField label="Location ID" value={poData.deliverTo?.locationCode?.id} isMono />
+            <FormField label="Location Name" value={poData.deliverTo?.locationCode?.name} className="md:col-span-2" />
+            <FormField label="Location Description" value={poData.deliverTo?.locationCode?.description} className="md:col-span-2" />
+            <FormField label="Physical Address" value={poData.deliverTo?.locationCode?.address} className="md:col-span-2" />
+            <FormField label="City" value={poData.deliverTo?.locationCode?.city} />
+            <FormField label="State" value={poData.deliverTo?.locationCode?.state} />
+            <FormField label="Postal Code" value={poData.deliverTo?.locationCode?.postalCode} isMono />
+            <FormField label="Region" value={poData.deliverTo?.locationCode?.region} />
+            <FormField label="Location Status" value={poData.deliverTo?.locationCode?.status} />
+          </div>
+        </AccordionSection>
+      </div>
+
+      {/* 3. Line Item Details Section */}
+      <div className="p-5 space-y-5 bg-white border shadow-sm border-slate-200 rounded-xl">
+        <div className="flex flex-col justify-between gap-2 pb-3 border-b sm:flex-row sm:items-center border-slate-100">
+          <div>
+            <h3 className="text-xs font-bold tracking-wider uppercase text-slate-700">
+              3. Line Item Details ({lineItems.length})
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Select any row in the table below to edit its values in the form fields. Changes update the row instantly.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleAddNewItem}
+            className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 transition-colors"
+          >
+            + Add Line Item
+          </button>
+        </div>
+
+        {/* EDIT FORM FIELDS (Positioned strictly ABOVE the Table) */}
+        {lineItems.length > 0 && selectedIdx >= 0 ? (
+          <div className="p-4 space-y-4 border bg-slate-50 border-slate-200 rounded-xl">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold tracking-wider uppercase text-slate-700">
+                Edit Selected Line Item (Row #{selectedIdx + 1}: <span className="font-mono text-indigo-600">{lineItems[selectedIdx]?.partNumber}</span>)
+              </h4>
+              <span className="text-[11px] text-emerald-600 font-semibold">Changes Apply Instantly to Row</span>
             </div>
 
-            {additionalFiles.length > 0 && (
-              <div className='mt-4 pt-3 border-t border-slate-100 space-y-1.5'>
-                {additionalFiles.map((file, idx) => (
-                  <div key={idx} className='flex items-center justify-between text-xs bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200'>
-                    <span className='text-slate-700 truncate font-medium max-w-[280px]'>
-                      Additional File {idx + 1}: <span className='font-normal text-slate-500'>{file.name}</span>
-                    </span>
-                    <button
-                      type='button'
-                      onClick={() => removeAdditionalFile(idx)}
-                      className='ml-2 font-bold transition text-slate-400 hover:text-rose-600'
-                      title='Remove file'
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
+            <div className="grid grid-cols-1 gap-4 text-xs md:grid-cols-4">
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Part Number</label>
+                <input
+                  type="text"
+                  value={editForm.partNumber || ''}
+                  onChange={(e) => handleEditChange('partNumber', e.target.value)}
+                  className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
               </div>
-            )}
-          </div>
-        </div>
 
-        {/* 1. PO Header Details */}
-        <div className='p-6 space-y-4 bg-white border shadow-sm rounded-2xl border-slate-200'>
-          <h2 className='text-xs font-bold tracking-wider uppercase text-slate-500'>1. PO Header Details</h2>
-          <div className='grid grid-cols-1 gap-4 sm:grid-cols-4'>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>PO Number</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                name='poNumber'
-                value={form.poNumber}
-                onChange={handle}
-              />
-            </div>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>Customer Name</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                name='customerName'
-                value={form.customerName}
-                onChange={handle}
-              />
-            </div>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>Supplier</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                name='supplier'
-                value={form.supplier}
-                onChange={handle}
-              />
-            </div>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>Shipment</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                name='shipment'
-                value={form.shipment}
-                onChange={handle}
-              />
-            </div>
-          </div>
-        </div>
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Catalog Part</label>
+                <select
+                  value={editForm.catalogMatch || ''}
+                  onChange={(e) => handleEditChange('catalogMatch', e.target.value)}
+                  className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                >
+                  <option value="FN4FC">FN4FC - Dell Networking Cable QSFP28</option>
+                  <option value="C2ZK6EC">C2ZK6EC - HP EliteBook X Flip G2i AI</option>
+                  <option value="APP-MBP16">APP-MBP16 - Apple MacBook Pro 16 M3</option>
+                  <option value="LEN-T14">LEN-T14 - Lenovo ThinkPad T14 Gen 4</option>
+                </select>
+              </div>
 
-        {/* 2. Shipping & Entity Address */}
-        <div className='p-6 space-y-4 bg-white border shadow-sm rounded-2xl border-slate-200'>
-          <h2 className='text-xs font-bold tracking-wider uppercase text-slate-500'>2. Shipping & Entity Address</h2>
-          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-5'>
-            <div className='md:col-span-2'>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>Address</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200'
-                name='address1'
-                value={form.address1}
-                onChange={handle}
-              />
-            </div>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>Country</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200'
-                name='country'
-                value={form.country}
-                onChange={handle}
-              />
-            </div>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>State</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200'
-                name='state'
-                value={form.state}
-                onChange={handle}
-              />
-            </div>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>City</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200'
-                name='city'
-                value={form.city}
-                onChange={handle}
-              />
-            </div>
-            <div>
-              <label className='block mb-1 text-xs font-semibold text-slate-600'>Postal Code</label>
-              <input
-                className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200'
-                name='pincode'
-                value={form.pincode}
-                onChange={handle}
-              />
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Entity Name</label>
+                <input
+                  type="text"
+                  value={editForm.entityName || ''}
+                  onChange={(e) => handleEditChange('entityName', e.target.value)}
+                  className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Entity Code</label>
+                <input
+                  type="text"
+                  value={editForm.entityCode || ''}
+                  onChange={(e) => handleEditChange('entityCode', e.target.value)}
+                  className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Units</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={editForm.quantity || ''}
+                  onChange={(e) => handleEditChange('quantity', e.target.value)}
+                  className="w-full px-3 py-2 font-bold bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Unit Price (USD)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editForm.unitPrice ?? ''}
+                  onChange={(e) => handleEditChange('unitPrice', e.target.value)}
+                  className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Total Cost</label>
+                <input
+                  readOnly
+                  value={`$${Number(editForm.amount || 0).toFixed(2)}`}
+                  className="w-full px-3 py-2 font-mono font-bold border rounded-md bg-slate-100 border-slate-200 text-slate-700"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 font-semibold text-slate-600">Billing Method</label>
+                <select
+                  value={editForm.billingMethod || 'Monthly'}
+                  onChange={(e) => handleEditChange('billingMethod', e.target.value)}
+                  className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                >
+                  <option value="Monthly">Monthly</option>
+                  <option value="Quarterly">Quarterly</option>
+                  <option value="Annually">Annually</option>
+                  <option value="One-Time">One-Time</option>
+                </select>
+              </div>
             </div>
           </div>
-        </div>
-
-        {/* 3. Line Items Details Table */}
-        <div className='overflow-hidden bg-white border shadow-sm rounded-2xl border-slate-200'>
-          <div className='flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50/50'>
-            <h2 className='text-xs font-bold tracking-wider uppercase text-slate-600'>
-              3. Line Item Details ({rows.length})
-            </h2>
-            <span className='text-xs text-slate-400'>Click any row to select and edit its values below</span>
+        ) : (
+          <div className="p-4 text-xs text-center border border-dashed bg-slate-50 border-slate-200 rounded-xl text-slate-400">
+            Upload a PDF document above or click "+ Add Line Item" to edit line item attributes.
           </div>
+        )}
 
-          <div className='overflow-x-auto'>
-            <table className='w-full text-xs text-left'>
-              <thead className='font-semibold uppercase border-b bg-slate-50 text-slate-500 border-slate-200'>
-                <tr>
-                  <th className='p-3'>Part Number</th>
-                  <th className='p-3'>Catalog Match</th>
-                  <th className='p-3'>Entity / Code</th>
-                  <th className='p-3 text-center'>Units</th>
-                  <th className='p-3 text-right'>Unit Price</th>
-                  <th className='p-3 text-right'>Total</th>
-                  <th className='p-3 text-center'>Billing</th>
-                  <th className='p-3 text-center'>Delete</th>
-                </tr>
-              </thead>
-              <tbody className='divide-y divide-slate-100'>
-                {rows.map((r) => (
+        {/* LINE ITEMS TABLE */}
+        <div className="overflow-x-auto border rounded-lg border-slate-200">
+          <table className="w-full text-xs text-left border-collapse">
+            <thead>
+              <tr className="font-semibold tracking-wider uppercase border-b bg-slate-50 border-slate-200 text-slate-600">
+                <th className="py-2.5 px-3">Part Number</th>
+                <th className="py-2.5 px-3">Catalog Match</th>
+                <th className="py-2.5 px-3">Entity / Code</th>
+                <th className="py-2.5 px-3 text-center">Units</th>
+                <th className="py-2.5 px-3 text-right">Unit Price</th>
+                <th className="py-2.5 px-3 text-right">Total</th>
+                <th className="py-2.5 px-3">Billing</th>
+                <th className="py-2.5 px-3 text-center">Delete</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {lineItems.map((item, idx) => {
+                const isSelected = idx === selectedIdx;
+                return (
                   <tr
-                    key={r.id}
-                    onClick={() => handleSelectRow(r)}
-                    className={`cursor-pointer transition hover:bg-slate-50 ${
-                      selectedRowId === r.id ? 'bg-indigo-50/70 font-medium' : ''
+                    key={idx}
+                    onClick={() => setSelectedIdx(idx)}
+                    className={`cursor-pointer transition-colors ${
+                      isSelected ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : 'hover:bg-slate-50'
                     }`}
                   >
-                    <td className='p-3 font-mono text-indigo-600 underline decoration-indigo-200 underline-offset-2'>
-                      {r.partNumber || '—'}
+                    <td className="px-3 py-3 font-mono font-semibold text-indigo-700">{item.partNumber}</td>
+                    <td className="px-3 py-3 font-mono font-semibold text-emerald-600">
+                      {item.catalogMatch || item.partNumber}
                     </td>
-                    <td className='p-3'>
-                      {r.catalog ? (
-                        <span className='font-semibold text-emerald-700'>{r.catalog}</span>
-                      ) : (
-                        <span className='font-semibold text-rose-500'>No match</span>
-                      )}
+                    <td className="px-3 py-3 text-slate-700">
+                      <div className="max-w-xs font-medium truncate">{item.entityName || '—'}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{item.entityCode || '—'}</div>
                     </td>
-                    <td className='p-3'>
-                      <div className='font-semibold text-slate-700'>{r.customerEntity || '—'}</div>
-                      <div className='text-slate-400 font-mono text-[11px]'>{r.entityCode || ''}</div>
+                    <td className="px-3 py-3 font-bold text-center text-slate-800">{item.quantity}</td>
+                    <td className="px-3 py-3 font-mono text-right text-slate-600">${Number(item.unitPrice).toFixed(2)}</td>
+                    <td className="px-3 py-3 font-mono font-bold text-right text-slate-900">
+                      ${Number(item.amount).toFixed(2)}
                     </td>
-                    <td className='p-3 font-bold text-center text-slate-800'>{r.units}</td>
-                    <td className='p-3 font-mono text-right text-slate-700'>
-                      ${(+r.perUnitCost || 0).toFixed(2)}
-                    </td>
-                    <td className='p-3 font-mono font-bold text-right text-slate-900'>
-                      ${(+r.totalCost || 0).toFixed(2)}
-                    </td>
-                    <td className='p-3 text-center text-slate-600'>{r.billingMethod || 'Monthly'}</td>
-                    <td className='p-3 text-center' onClick={(e) => e.stopPropagation()}>
+                    <td className="px-3 py-3 text-slate-600">{item.billingMethod || 'Monthly'}</td>
+                    <td className="px-3 py-3 text-center">
                       <button
-                        type='button'
-                        onClick={() => handleDeleteRow(r.id)}
-                        className='p-1 font-bold rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50'
-                        title='Delete item'
+                        type="button"
+                        onClick={(e) => handleDeleteRow(e, idx)}
+                        className="p-1 transition-colors rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+                        title="Delete row"
                       >
-                        ✕
+                        <svg className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
                       </button>
                     </td>
                   </tr>
-                ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className='p-8 text-center text-slate-400'>
-                      No line items registered. Please upload a PO PDF.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className='flex flex-col items-center justify-between p-4 text-xs font-semibold border-t bg-slate-50 border-slate-200 sm:flex-row text-slate-700'>
-            <span>Total Units: {totalUnits}</span>
-            <span>Grand Total: ${grandTotal.toFixed(2)} USD</span>
-          </div>
-
-          {/* Direct Live Editing Form */}
-          {rows.length > 0 && (
-            <div className='p-5 border-t bg-slate-50/40 border-slate-200'>
-              <h3 className='mb-3 text-xs font-bold uppercase text-slate-500'>
-                Edit Selected Line Item (Changes apply instantly)
-              </h3>
-              <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4'>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Part Number</label>
-                  <input
-                    className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                    name='partNumber'
-                    value={form.partNumber}
-                    onChange={(e) => handleLineItemChange('partNumber', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Catalog Part</label>
-                  <select
-                    className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                    name='catalog'
-                    value={form.catalog}
-                    onChange={(e) => handleLineItemChange('catalog', e.target.value)}
-                  >
-                    <option value=''>Select Item</option>
-                    {catalogOptions.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Entity Name</label>
-                  <input
-                    className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                    name='customerEntity'
-                    value={form.customerEntity}
-                    onChange={(e) => handleLineItemChange('customerEntity', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Entity Code</label>
-                  <input
-                    className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                    name='entityCode'
-                    value={form.entityCode}
-                    onChange={(e) => handleLineItemChange('entityCode', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Units</label>
-                  <input
-                    type='number'
-                    className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                    name='units'
-                    value={form.units}
-                    onChange={(e) => handleLineItemChange('units', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Unit Price (USD)</label>
-                  <input
-                    type='number'
-                    className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                    name='perUnitCost'
-                    value={form.perUnitCost}
-                    onChange={(e) => handleLineItemChange('perUnitCost', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Total Cost</label>
-                  <input
-                    readOnly
-                    className='w-full px-3 py-2 text-sm font-semibold border rounded-lg bg-slate-100 border-slate-200 text-slate-600'
-                    value={`$${currentTotalCost.toFixed(2)}`}
-                  />
-                </div>
-                <div>
-                  <label className='block mb-1 text-xs font-semibold text-slate-600'>Billing Method</label>
-                  <select
-                    className='w-full px-3 py-2 text-sm bg-white border rounded-lg border-slate-200 focus:ring-2 focus:ring-indigo-500'
-                    name='billingMethod'
-                    value={form.billingMethod}
-                    onChange={(e) => handleLineItemChange('billingMethod', e.target.value)}
-                  >
-                    <option>Monthly</option>
-                    <option>Quarterly</option>
-                    <option>OneTime</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
+                );
+              })}
+              {!lineItems.length && (
+                <tr>
+                  <td colSpan={8} className="py-10 text-center text-slate-400">
+                    No line items available. Upload a Customer PO PDF above or click "+ Add Line Item".
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
 
-        {/* Save Purchase Order Button */}
-        <div className='flex justify-end'>
+        {/* Summary Footer */}
+        {lineItems.length > 0 && (
+          <div className="flex items-center justify-between px-1 pt-1 text-xs font-semibold text-slate-700">
+            <div>Total Units: <span className="text-slate-900">{totalUnits}</span></div>
+            <div>Grand Total: <span className="font-mono text-sm font-bold text-indigo-700">${grandTotal.toFixed(2)} USD</span></div>
+          </div>
+        )}
+
+        {/* Global Save Button */}
+        <div className="flex justify-end pt-4">
           <button
-            type='button'
-            onClick={handleSubmitPO}
-            disabled={rows.length === 0}
-            className={`px-6 py-3 rounded-xl font-bold text-sm shadow-md transition ${
-              rows.length === 0
-                ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
-                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-            }`}
+            type="button"
+            onClick={handleSavePo}
+            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
           >
             Save Customer Purchase Order
           </button>
         </div>
-
       </div>
     </div>
   );

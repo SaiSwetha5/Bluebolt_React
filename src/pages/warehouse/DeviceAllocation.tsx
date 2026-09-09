@@ -21,9 +21,11 @@ export interface AllocationPayload {
   courierCarrier?: string;
   courierTracking?: string;
   provisioningProfile: 'WINDOWS_AUTOPILOT' | 'INTUNE_CORP' | 'JAMF_MAC_CORP' | 'LINUX_STAGING';
-  allocatedDate: string;
-  targetRefreshDate: string;
-  notes?: string;
+allocatedDate: string;
+warrantyStartDate: string;
+targetLeaseDate: string;
+targetRefreshDate: string;
+notes?: string;
 }
 
 type StatusFilterType = 'ALL' | 'IN_STOCK' | 'ALLOCATED';
@@ -93,10 +95,25 @@ export default function DeviceAllocation() {
     shippingAddress: '',
     courierCarrier: 'FedEx Priority',
     courierTracking: '',
-    provisioningProfile: 'WINDOWS_AUTOPILOT',
-    allocatedDate: new Date().toISOString().split('T')[0],
-    targetRefreshDate: new Date(new Date().setFullYear(new Date().getFullYear() + 3)).toISOString().split('T')[0],
-    notes: '',
+ provisioningProfile: 'WINDOWS_AUTOPILOT',
+
+allocatedDate: new Date().toISOString().split('T')[0],
+
+warrantyStartDate: new Date().toISOString().split('T')[0],
+
+targetLeaseDate: new Date(
+  new Date().setFullYear(new Date().getFullYear() + 3)
+)
+  .toISOString()
+  .split('T')[0],
+
+targetRefreshDate: new Date(
+  new Date().setFullYear(new Date().getFullYear() + 4)
+)
+  .toISOString()
+  .split('T')[0],
+
+notes: '',
   });
 
   // Accurate Dynamic Counts
@@ -143,18 +160,7 @@ export default function DeviceAllocation() {
     });
   }, [assets, search, statusFilter]);
 
-  // Code Download Trigger
-  const handleDownloadSource = () => {
-    const file = new Blob([/* Insert this entire file's text here if embedding as string */ ''], {
-      type: 'text/typescript;charset=utf-8',
-    });
-    const element = document.createElement('a');
-    element.href = URL.createObjectURL(file);
-    element.download = 'DeviceAllocation.tsx';
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-  };
+ 
 
   function openAllocationModal(asset: any) {
     setSelectedAsset(asset);
@@ -518,38 +524,55 @@ export default function DeviceAllocation() {
                 </div>
               </div>
 
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                  3. Lifecycle Dates
-                </h3>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-slate-700">
-                      Allocation / Billing Start Date
-                    </label>
-                    <input
-                      type="date"
-                      name="allocatedDate"
-                      value={formData.allocatedDate}
-                      onChange={handleInputChange}
-                      className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-slate-700">
-                      Target Lease Refresh / LRM Date
-                    </label>
-                    <input
-                      type="date"
-                      name="targetRefreshDate"
-                      value={formData.targetRefreshDate}
-                      onChange={handleInputChange}
-                      className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
+          <div>
+  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
+    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+    3. Lifecycle Dates
+  </h3>
+
+  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div>
+      <label className="block mb-1 text-xs font-semibold text-slate-700">
+        Allocation Start Date
+      </label>
+      <input
+        type="date"
+        name="allocatedDate"
+        value={formData.allocatedDate}
+        onChange={handleInputChange}
+        className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+      />
+    </div>
+
+    <div>
+      <label className="block mb-1 text-xs font-semibold text-slate-700">
+        Warranty Start Date
+      </label>
+      <input
+        type="date"
+        name="warrantyStartDate"
+        value={formData.warrantyStartDate}
+        onChange={handleInputChange}
+        className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+      />
+    </div>
+
+  
+
+    <div>
+      <label className="block mb-1 text-xs font-semibold text-slate-700">
+        Target Lease Refresh / LRM Date
+      </label>
+      <input
+        type="date"
+        name="targetRefreshDate"
+        value={formData.targetRefreshDate}
+        onChange={handleInputChange}
+        className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+      />
+    </div>
+  </div>
+</div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
                 <button
@@ -563,7 +586,7 @@ export default function DeviceAllocation() {
                   type="submit"
                   className="px-5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
-                  Confirm Allocation &amp; Mark Dispatched
+                  Confirm Allocation
                 </button>
               </div>
             </form>
