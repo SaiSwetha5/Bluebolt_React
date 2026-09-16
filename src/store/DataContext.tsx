@@ -590,8 +590,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       counters2.current.sub = 2;
 
       const seedInv: ReceivableInvoice = { id:'RINV-00001', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:1, amount:seedSub.monthlyPayment, issueDate:'2026-07-01', dueDate:'2026-07-16', status:'PAID', receiptId:'RCPT-00001' };
-      rInvoicesRef.current = [seedInv]; setRInvoices([seedInv]);
-      counters2.current.rinv = 2;
+      const seedInv2: ReceivableInvoice = { id:'RINV-00002', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:2, amount:seedSub.monthlyPayment, issueDate:'2026-08-01', dueDate:'2026-08-16', status:'SENT' };
+      const seedInv3: ReceivableInvoice = { id:'RINV-00003', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:3, amount:seedSub.monthlyPayment, issueDate:'2026-09-01', dueDate:'2026-09-16', status:'SENT' };
+      rInvoicesRef.current = [seedInv3, seedInv2, seedInv]; setRInvoices(rInvoicesRef.current);
+      counters2.current.rinv = 4;
+      subsRef.current = subsRef.current.map(s => s.id === seedSub.id ? { ...s, nextInvoicePeriod: 4 } : s); setSubs([...subsRef.current]);
 
       const seedReceipt: Receipt = { id:'RCPT-00001', invoiceId:seedInv.id, subscriptionId:seedSub.id, amount:seedInv.amount, receivedAt:'2026-07-10T00:00:00.000Z', method:'ACH', reference:'ACH-REF-88213' };
       setReceipts([seedReceipt]);

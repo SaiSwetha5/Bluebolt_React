@@ -16,6 +16,7 @@ import DeviceAllocation from './pages/warehouse/DeviceAllocation';
 import GrnList from './pages/finance/GrnList';
 import InvoiceManagement from './pages/finance/InvoiceManagement';
 import ApProcessing from './pages/finance/ApProcessing';
+import ArProcessing from './pages/finance/ArProcessing';
 import AssetList from './pages/inventory/AssetList';
 import AssetDetail from './pages/inventory/AssetDetail';
 import CatalogList from './pages/catalog/CatalogList';
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="finance/grn" element={<GrnList />} />
             <Route path="finance/invoices" element={<InvoiceManagement />} />
             <Route path="finance/ap" element={<ApProcessing />} />
+            <Route path="finance/ar" element={<ArProcessing />} />
 
             {/* Inventory */}
             <Route path="inventory" element={<AssetList />} />

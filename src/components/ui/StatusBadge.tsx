@@ -13,6 +13,7 @@ const STYLES: Record<string, string> = {
   CLOSED:'bg-slate-100 text-slate-700', IN_PROCUREMENT:'bg-sky-100 text-sky-700',
   IN_STOCK:'bg-indigo-100 text-indigo-700', DEPLOYED:'bg-emerald-100 text-emerald-700',
   IN_REPAIR:'bg-amber-100 text-amber-800', RETIRED:'bg-slate-200 text-slate-600',
+  DUE:'bg-slate-100 text-slate-700', OVERDUE:'bg-rose-100 text-rose-700',
   Good:'bg-emerald-100 text-emerald-700', Damaged:'bg-rose-100 text-rose-700', Partial:'bg-amber-100 text-amber-800'
 };
 

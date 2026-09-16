@@ -24,14 +24,19 @@ const navGroups: NavGroup[] = [
     { label: 'GRNs', icon: '🧾', link: '/finance/grn' },
     { label: 'Invoices & Lease', icon: '💰', link: '/finance/invoices' },
     { label: 'Accounts Payable', icon: '🏦', link: '/finance/ap' },
+    { label: 'Accounts Receivable', icon: '💵', link: '/receivables' },
+      { label: 'Customer Subscriptions', icon: '📱', link: '/receivables/subscriptions' },
   ]},
+
   { title: 'Asset Management', items: [
     { label: 'Inventory / CMDB', icon: '🖥', link: '/inventory' },
     { label: 'Catalog Management', icon: '📘', link: '/catalog' },
     
-    { label: 'Customer Entity', icon: '\uD83D\uDCD8', link: '/customer-entity' },
-    
    
+  ]},
+
+  { title: 'Customer Management', items: [
+   { label: 'Customer Entity', icon: '\uD83D\uDCD8', link: '/customer-entity' },
          { label: 'Cost Management', icon: '\uD83D\uDCD8', link: '/customer' },
   ]},
   { title: 'Governance', items: [
@@ -40,7 +45,7 @@ const navGroups: NavGroup[] = [
   // --- Continuation modules (additive nav groups) ---
   { title: 'DaaS Receivables', items: [
     { label: 'Receivables Overview', icon: '💵', link: '/receivables' },
-    { label: 'Customer Subscriptions', icon: '📱', link: '/receivables/subscriptions' },
+  
     { label: 'Lease Calculator', icon: '🧮', link: '/leasing/calculator' },
   ]},
   { title: 'Account Management', items: [
