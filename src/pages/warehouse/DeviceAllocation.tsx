@@ -73,9 +73,30 @@ export function isDeviceInStock(asset: any): boolean {
 
 export default function DeviceAllocation() {
   const { assets = [], assignAsset } = useData();
+  const [employeeIdError, setEmployeeIdError] = useState('');
   const [search, setSearch] = useState('');
   const [selectedAsset, setSelectedAsset] = useState<any | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('IN_STOCK');
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [dateErrors, setDateErrors] = useState({
+  warrantyStartDate: '',
+  targetRefreshDate: '',
+});
+
+
+  // Accordion State
+  const [expandedSections, setExpandedSections] = useState({
+  recipient: true,
+  lifecycle: true,
+});
+
+const toggleSection = (section: keyof typeof expandedSections) => {
+  console.log('clicked', section);
+  setExpandedSections((prev) => ({
+    ...prev,
+    [section]: !prev[section],
+  }));
+};
 
   // Form State for Allocation Modal
   const [formData, setFormData] = useState<AllocationPayload>({
@@ -173,41 +194,141 @@ notes: '',
     }));
   }
 
+
   function closeModal() {
     setSelectedAsset(null);
   }
 
-  function handleInputChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  function performAllocation() {
+  if (typeof assignAsset === 'function') {
+    assignAsset(
+      formData.assetId,
+      `${formData.recipientName} (${formData.employeeId})`,
+      formData.deliveryMethod === 'DIRECT_OFFICE'
+        ? formData.buildingFloorDesk || 'Office Desk'
+        : `Shipped: ${formData.courierTracking || 'Pending Tracking'}`,
+      {
+        ...formData,
+        lifecycleStatus: 'ALLOCATED',
+        status: 'ALLOCATED',
+      }
+    );
+  }
+
+  closeModal();
+}
+  
+function handleInputChange(
+  e: React.ChangeEvent<
+    HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+  >
+) {
+  const { name, value } = e.target;
+
+const updatedFormData = {
+  ...formData,
+  [name]: value,
+};
+
+  setFormData(updatedFormData);
+
+  // Live date validation
+  if (
+    name === 'allocatedDate' ||
+    name === 'warrantyStartDate' ||
+    name === 'targetRefreshDate'
   ) {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const allocationTimestamp = new Date(
+      updatedFormData.allocatedDate
+    ).getTime();
+
+    const warrantyTimestamp = new Date(
+      updatedFormData.warrantyStartDate
+    ).getTime();
+
+    const refreshTimestamp = new Date(
+      updatedFormData.targetRefreshDate
+    ).getTime();
+
+    setDateErrors({
+      warrantyStartDate:
+        updatedFormData.allocatedDate &&
+        updatedFormData.warrantyStartDate &&
+        warrantyTimestamp < allocationTimestamp
+          ? 'Warranty Start Date must be greater than or equal to Allocation Start Date.'
+          : '',
+
+      targetRefreshDate:
+        updatedFormData.warrantyStartDate &&
+        updatedFormData.targetRefreshDate &&
+        refreshTimestamp <= warrantyTimestamp
+          ? 'Lease Refresh Date must be greater than Warranty Start Date.'
+          : '',
+    });
+  }
+}
+
+function handleSubmitAllocation(e: React.FormEvent) {
+  e.preventDefault();
+
+  // Employee ID validation
+  if (/[^A-Za-z0-9]/.test(formData.employeeId)) {
+    setEmployeeIdError(
+      'Special characters are not allowed. Use only letters and numbers.'
+    );
+    return;
   }
 
-  function handleSubmitAllocation(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formData.recipientName || !formData.employeeId || !formData.costCenter) {
-      alert('Please fill in all mandatory fields (Employee ID, Name, Cost Center).');
-      return;
-    }
-
-    if (typeof assignAsset === 'function') {
-      assignAsset(
-        formData.assetId,
-        `${formData.recipientName} (${formData.employeeId})`,
-        formData.deliveryMethod === 'DIRECT_OFFICE'
-          ? formData.buildingFloorDesk || 'Office Desk'
-          : `Shipped: ${formData.courierTracking || 'Pending Tracking'}`,
-        {
-          ...formData,
-          lifecycleStatus: 'ALLOCATED',
-          status: 'ALLOCATED',
-        }
-      );
-    }
-
-    closeModal();
+  // Mandatory field validation
+  if (
+    !formData.recipientName ||
+    !formData.employeeId ||
+    !formData.costCenter
+  ) {
+    alert(
+      'Please fill in all mandatory fields (Employee ID, Name, Cost Center).'
+    );
+    return;
   }
+
+  // Convert dates to timestamps
+  const allocationTimestamp = new Date(
+    formData.allocatedDate
+  ).getTime();
+
+  const warrantyTimestamp = new Date(
+    formData.warrantyStartDate
+  ).getTime();
+
+  const refreshTimestamp = new Date(
+    formData.targetRefreshDate
+  ).getTime();
+
+  const newDateErrors = {
+    warrantyStartDate:
+      warrantyTimestamp < allocationTimestamp
+        ? 'Warranty Start Date must be greater than or equal to Allocation Start Date.'
+        : '',
+
+    targetRefreshDate:
+      refreshTimestamp <= warrantyTimestamp
+        ? 'Lease Refresh Date must be greater than Warranty Start Date.'
+        : '',
+  };
+
+  setDateErrors(newDateErrors);
+
+  // Stop if date validation failed
+  if (
+    newDateErrors.warrantyStartDate ||
+    newDateErrors.targetRefreshDate
+  ) {
+    return;
+  }
+
+  // Everything is valid, show confirmation
+  setShowConfirmModal(true);
+}
 
   return (
     <div className="space-y-4">
@@ -419,22 +540,92 @@ notes: '',
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                  1. Recipient &amp; Cost Center Attribution
+                  Order &amp; Requisition Alignment
                 </h3>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label className="block mb-1 text-xs font-semibold text-slate-700">
-                      Employee ID <span className="text-rose-500">*</span>
+                      Linked Customer PO / Project Ref
                     </label>
                     <input
-                      required
-                      name="employeeId"
-                      value={formData.employeeId}
+                      name="customerPoRef"
+                      value={formData.customerPoRef}
                       onChange={handleInputChange}
-                      placeholder="e.g. CGZ-98124"
-                      className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="w-full px-3 py-2 font-mono border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
                   </div>
+                  <div>
+                    <label className="block mb-1 text-xs font-semibold text-slate-700">
+                      Service Ticket / Requisition ID
+                    </label>
+                    <input
+                      name="ticketRef"
+                      value={formData.ticketRef}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 font-mono border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+<div className="p-4 border rounded-lg border-slate-200">
+  <button
+    type="button"
+    onClick={() => toggleSection('recipient')}
+    className="flex items-center justify-between w-full"
+  >
+    <h3 className="flex items-center mb-4 text-xs font-bold tracking-wider uppercase text-slate-500">
+      <span className="m-2 w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+       Recipient & Cost Center Attribution
+    </h3>
+
+    <span>
+      {expandedSections.recipient ? '▼' : 'view details ▼'}
+    </span>
+  </button>
+
+  {expandedSections.recipient && (
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div>
+  <label className="block mb-1 text-xs font-semibold text-slate-700">
+    Employee ID <span className="text-rose-500">*</span>
+  </label>
+
+  <input
+    required
+    name="employeeId"
+    value={formData.employeeId}
+    onChange={(e) => {
+      const value = e.target.value;
+
+      if (/[^A-Za-z0-9]/.test(value)) {
+        setEmployeeIdError(
+          'Special characters are not allowed. Use only letters and numbers.'
+        );
+      } else {
+        setEmployeeIdError('');
+      }
+
+      setFormData((prev) => ({
+        ...prev,
+        employeeId: value,
+      }));
+    }}
+    placeholder="e.g. CGZ98124"
+    className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:outline-none ${
+      employeeIdError
+        ? 'border-red-500 focus:ring-red-500'
+        : 'border-slate-300 focus:ring-blue-500'
+    }`}
+  />
+
+  {employeeIdError && (
+    <p className="mt-1 text-xs text-red-600">
+      {employeeIdError}
+    </p>
+  )}
+</div>
                   <div>
                     <label className="block mb-1 text-xs font-semibold text-slate-700">
                       Employee Full Name <span className="text-rose-500">*</span>
@@ -491,43 +682,13 @@ notes: '',
                     />
                   </div>
                 </div>
-              </div>
+              )}</div>
 
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                  2. Order &amp; Requisition Alignment
-                </h3>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-slate-700">
-                      Linked Customer PO / Project Ref
-                    </label>
-                    <input
-                      name="customerPoRef"
-                      value={formData.customerPoRef}
-                      onChange={handleInputChange}
-                      className="w-full px-3 py-2 font-mono border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-slate-700">
-                      Service Ticket / Requisition ID
-                    </label>
-                    <input
-                      name="ticketRef"
-                      value={formData.ticketRef}
-                      onChange={handleInputChange}
-                      className="w-full px-3 py-2 font-mono border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-          <div>
-  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
-    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-    3. Lifecycle Dates
+                  
+     Lifecycle Dates
   </h3>
 
   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -545,32 +706,54 @@ notes: '',
     </div>
 
     <div>
-      <label className="block mb-1 text-xs font-semibold text-slate-700">
-        Warranty Start Date
-      </label>
-      <input
-        type="date"
-        name="warrantyStartDate"
-        value={formData.warrantyStartDate}
-        onChange={handleInputChange}
-        className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-      />
-    </div>
+  <label className="block mb-1 text-xs font-semibold text-slate-700">
+    Warranty Start Date
+  </label>
+
+<input
+  type="date"
+  name="warrantyStartDate"
+  value={formData.warrantyStartDate}
+  onChange={handleInputChange}
+  className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:outline-none ${
+    dateErrors.warrantyStartDate
+      ? 'border-red-500 focus:ring-red-500'
+      : 'border-slate-300 focus:ring-blue-500'
+  }`}
+/>
+
+{dateErrors.warrantyStartDate && (
+  <p className="mt-1 text-xs text-red-600">
+    {dateErrors.warrantyStartDate}
+  </p>
+)}
+</div>
 
   
 
     <div>
-      <label className="block mb-1 text-xs font-semibold text-slate-700">
-        Target Lease Refresh / LRM Date
-      </label>
-      <input
-        type="date"
-        name="targetRefreshDate"
-        value={formData.targetRefreshDate}
-        onChange={handleInputChange}
-        className="w-full px-3 py-2 border rounded-md border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-      />
-    </div>
+  <label className="block mb-1 text-xs font-semibold text-slate-700">
+    Target Lease Refresh / LRM Date
+  </label>
+
+  <input
+    type="date"
+    name="targetRefreshDate"
+    value={formData.targetRefreshDate}
+    onChange={handleInputChange}
+    className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:outline-none ${
+      dateErrors.targetRefreshDate
+        ? 'border-red-500 focus:ring-red-500'
+        : 'border-slate-300 focus:ring-blue-500'
+    }`}
+  />
+
+  {dateErrors.targetRefreshDate && (
+    <p className="mt-1 text-xs text-red-600">
+      {dateErrors.targetRefreshDate}
+    </p>
+  )}
+</div>
   </div>
 </div>
 
@@ -593,6 +776,47 @@ notes: '',
           </div>
         </div>
       )}
+      {showConfirmModal && (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+    <div className="w-full max-w-md p-6 bg-white shadow-xl rounded-xl">
+      <h3 className="mb-3 text-lg font-semibold text-slate-800">
+        Confirm Allocation
+      </h3>
+
+      <p className="text-sm text-slate-600">
+        Are you sure you want to allocate laptop
+        <strong> "{formData.model}" </strong>
+        to
+        <strong>
+          {" "}
+          {formData.recipientName} ({formData.employeeId})
+        </strong>
+        ?
+      </p>
+
+      <div className="flex justify-end gap-3 mt-6">
+        <button
+          type="button"
+          onClick={() => setShowConfirmModal(false)}
+          className="px-4 py-2 text-sm rounded-lg bg-slate-200 hover:bg-slate-300"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowConfirmModal(false);
+            performAllocation();
+          }}
+          className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+        >
+          Confirm
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
