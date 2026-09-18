@@ -390,11 +390,16 @@ export default function CustomerPoUpload() {
           <div className="flex items-center gap-2 mt-3">
         <input
       type="file"
+      disabled
       multiple
       className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-500 cursor-not-allowed"
       onChange={(e) => setAdditionalFiles(e.target.files)}
     />
-          </div>
+    </div>
+       <p className="mt-2 text-xs text-slate-400">
+      Additional file upload is currently disabled.
+    </p>
+         
         </div>
       </div>
 

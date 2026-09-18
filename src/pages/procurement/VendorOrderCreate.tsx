@@ -10,8 +10,8 @@ export default function VendorOrderCreate() {
   const [vrCurrentGen, setVrCurrentGen] = useState('');
   const [vrSku1, setVrSku1] = useState('');
   const [vrVendor, setVrVendor] = useState<VendorName | ''>('');
-  const [vrQuantity, setVrQuantity] = useState(1);
-  const [vrUnitCost, setVrUnitCost] = useState(0);
+  const [vrQuantity, setVrQuantity] = useState<number | ''>('');
+  const [vrUnitCost, setVrUnitCost] = useState<number | ''>('');
   const [vrCatalogItemId, setVrCatalogItemId] = useState('');
   const [vrCognizantPo, setVrCognizantPo] = useState('');
   const [vrChannel, setVrChannel] = useState<VendorName extends string ? VendorOrderCreate['channel'] : 'Webshop Portal'>('Webshop Portal' as const);
@@ -21,6 +21,16 @@ export default function VendorOrderCreate() {
   const [previewVoId, setPreviewVoId] = useState<string | null>(null);
   const [newCatalogItemName, setNewCatalogItemName] = useState('');
   const [customCatalogItems, setCustomCatalogItems] = useState<{id:string;name:string}[]>([]);
+  const [quantityError, setQuantityError] = useState('');
+  const [unitCostError, setUnitCostError] = useState('');
+  const [poError, setPoError] = useState('');
+  const [vendorErrors, setVendorErrors] = useState({
+  vendor: '',
+  quantity: '',
+  unitCost: '',
+  cognizantPo: '',
+  warehouseAddress: '',
+});
 
   const totalCost = (Number(vrQuantity)||0) * (Number(vrUnitCost)||0);
 
@@ -41,32 +51,223 @@ export default function VendorOrderCreate() {
   }, [catalog, filteredCatalogItems, vrCatalogItemId, vrCurrentGen]);
 
   const selectedCatalogItem = vrCatalogItemId ? catalog.find(c => c.id === vrCatalogItemId) : filteredCatalogItems.find(c => c.currentGenModel === vrCurrentGen);
+  
+function onModelCategoryChange(cat: ModelCategory) {
+  // Clear previous validation errors
+  setVrError('');
+  setQuantityError('');
+  setUnitCostError('');
 
-  function onModelCategoryChange(cat: ModelCategory) {
-    setVrModelCategory(cat); setVrCurrentGen(''); setVrSku1(''); setVrCatalogItemId('');
-    const first = catalog.filter(c => c.modelCategory === cat)[0];
-    if (first) { setVrCurrentGen(first.currentGenModel); setVrSku1(first.currentGenSku); setVrCatalogItemId(first.id); setVrUnitCost(first.vendorMappings[0]?.unitCost ?? 0); }
+  setVrModelCategory(cat);
+  setVrCurrentGen('');
+  setVrSku1('');
+  setVrCatalogItemId('');
+
+  const first = catalog.find(
+    (c) => c.modelCategory === cat
+  );
+
+  if (first) {
+    setVrCurrentGen(first.currentGenModel);
+    setVrSku1(first.currentGenSku);
+    setVrCatalogItemId(first.id);
+
+    const newUnitCost = first.vendorMappings[0]?.unitCost ?? 0;
+
+    setVrUnitCost(newUnitCost);
+
+    // Validate the automatically updated unit cost
+    if (newUnitCost <= 0) {
+      setUnitCostError('Unit Cost must be greater than 0');
+    } else if (newUnitCost > 10000) {
+      setUnitCostError('Unit Cost cannot exceed 10000 USD');
+    } else {
+      setUnitCostError('');
+    }
   }
-  function onCurrentGenChange(val: string) {
-    setVrCurrentGen(val);
-    const match = filteredCatalogItems.find(c => c.currentGenModel === val);
-    setVrSku1(match?.currentGenSku ?? ''); setVrCatalogItemId(match?.id ?? '');
-    if (match) { const vm = vrVendor ? match.vendorMappings.find(m => m.vendor === vrVendor) : match.vendorMappings[0]; setVrUnitCost(vm?.unitCost ?? 0); }
+}
+function onCurrentGenChange(val: string) {
+  setVrError('');
+  setUnitCostError('');
+
+  setVrCurrentGen(val);
+
+  const match = filteredCatalogItems.find(
+    (c) => c.currentGenModel === val
+  );
+
+  setVrSku1(match?.currentGenSku ?? '');
+  setVrCatalogItemId(match?.id ?? '');
+
+  if (match) {
+    const vm = vrVendor
+      ? match.vendorMappings.find(
+          (m) => m.vendor === vrVendor
+        )
+      : match.vendorMappings[0];
+
+    const newUnitCost = vm?.unitCost ?? 0;
+
+    setVrUnitCost(newUnitCost);
+
+    if (newUnitCost <= 0) {
+      setUnitCostError('Unit Cost must be greater than 0');
+    } else if (newUnitCost > 10000) {
+      setUnitCostError('Unit Cost cannot exceed 10000 USD');
+    } else {
+      setUnitCostError('');
+    }
   }
+}
   function onCatalogItemChange(id: string) {
-    setVrCatalogItemId(id);
-    const item = catalog.find(c => c.id === id);
-    if (item) { setVrCurrentGen(item.currentGenModel); setVrSku1(item.currentGenSku); setVrModelCategory(item.modelCategory); const vm = vrVendor ? item.vendorMappings.find(m => m.vendor === vrVendor) : item.vendorMappings[0]; if (vm) { setVrVendor(vm.vendor); setVrUnitCost(vm.unitCost); } }
+  setVrError('');
+  setUnitCostError('');
+
+  setVrCatalogItemId(id);
+
+  const item = catalog.find((c) => c.id === id);
+
+  if (!item) {
+    return;
   }
-  function onVendorChange(v: VendorName) {
-    setVrVendor(v);
-    const item = selectedCatalogItem;
-    if (item) { const vm = item.vendorMappings.find(m => m.vendor === v); if (vm) setVrUnitCost(vm.unitCost); }
+
+  setVrCurrentGen(item.currentGenModel);
+  setVrSku1(item.currentGenSku);
+  setVrModelCategory(item.modelCategory);
+
+  const vm = vrVendor
+    ? item.vendorMappings.find(
+        (m) => m.vendor === vrVendor
+      )
+    : item.vendorMappings[0];
+
+  if (vm) {
+    setVrVendor(vm.vendor);
+    setVrUnitCost(vm.unitCost);
+
+    if (vm.unitCost <= 0) {
+      setUnitCostError(
+        'Unit Cost must be greater than 0'
+      );
+    } else if (vm.unitCost > 10000) {
+      setUnitCostError(
+        'Unit Cost cannot exceed 10000 USD'
+      );
+    } else {
+      setUnitCostError('');
+    }
   }
+}
+ function onVendorChange(v: VendorName) {
+  setVrError('');
+  setVrVendor(v);
+
+  const item = selectedCatalogItem;
+
+  if (item) {
+    const vm = item.vendorMappings.find(
+      (m) => m.vendor === v
+    );
+
+    if (vm) {
+      setVrUnitCost(vm.unitCost);
+    }
+  }
+}
 
   const approvedPRs = useMemo(() => purchaseRequisitions.filter(pr => pr.status === 'APPROVED'), [purchaseRequisitions]);
 
-  function submitVendorRequest() {
+function submitVendorRequest() {
+  // ==========================================
+  // 1. MANDATORY FIELD VALIDATION
+  // ==========================================
+
+  if (
+    !vrModelCategory ||
+    !vrCurrentGen ||
+    !vrSku1 ||
+    !vrVendor ||
+    !vrQuantity ||
+    Number(vrQuantity) <= 0 ||
+    !vrUnitCost ||
+    Number(vrUnitCost) <= 0 ||
+    !vrCatalogItemId ||
+    !vrCognizantPo.trim() ||
+    !vrChannel ||
+    !vrDestination ||
+    !vrWarehouseAddress.trim()
+  ) {
+    setVrError('Please fill in all mandatory fields.');
+    return;
+  }
+
+  // ==========================================
+  // 2. EXISTING PO ERROR
+  // ==========================================
+
+  if (poError) {
+    setVrError('Please enter a valid PO Number.');
+    return;
+  }
+
+  // ==========================================
+  // 3. QUANTITY VALIDATION
+  // ==========================================
+
+  if (Number(vrQuantity) > 500) {
+    setVrError('Quantity cannot exceed 500.');
+    return;
+  }
+
+  if (Number(vrQuantity) <= 0) {
+    setVrError('Quantity must be greater than 0.');
+    return;
+  }
+
+  // ==========================================
+  // 4. UNIT COST VALIDATION
+  // ==========================================
+
+  if (Number(vrUnitCost) > 10000) {
+    setVrError('Unit Cost cannot exceed 10000 USD.');
+    return;
+  }
+
+  if (Number(vrUnitCost) <= 0) {
+    setVrError('Unit Cost must be greater than 0.');
+    return;
+  }
+
+  // ==========================================
+  // 5. ADDRESS VALIDATION
+  // ==========================================
+
+  if (
+    vrDestination === 'Client Office' &&
+    (
+      vrWarehouseAddress.trim().length < 20 ||
+      vrWarehouseAddress.trim().length > 500
+    )
+  ) {
+    setVrError(
+      'Client Office Address must be between 20 and 500 characters.'
+    );
+    return;
+  }
+
+  // ==========================================
+  // 6. PO VALIDATION
+  // ==========================================
+
+  if (!/^[A-Za-z0-9-]+$/.test(vrCognizantPo)) {
+    setVrError(
+      'PO Number can contain only letters, numbers, and hyphens.'
+    );
+    return;
+  }
+
+  // Everything is valid, remove previous error
+  setVrError('');
     const pr = approvedPRs[0] ?? null;
     const po = pr ? purchaseOrders.find(p => p.id === pr.poId) : null;
     const fallbackPo = purchaseOrders.find(p => p.status === 'APPROVED');
@@ -98,7 +299,6 @@ export default function VendorOrderCreate() {
     <div className="space-y-5">
       <div>
         <h1 className="text-lg font-bold text-slate-800">Procurement</h1>
-        <p className="text-sm text-slate-500">Raises a Cognizant PO to a vendor against an <strong>approved Purchase Requisition</strong> — stock and on-order quantities were already checked when that requisition was created.</p>
       </div>
 
       <div className="p-5 space-y-5 a360-card">
@@ -154,15 +354,132 @@ export default function VendorOrderCreate() {
               </select>
             </div>
             <div>
-              <label className="a360-label">Quantity</label>
-              <input className="a360-input" type="number" min="1" value={vrQuantity} onChange={e => setVrQuantity(Number(e.target.value))} required />
-            </div>
+  <label className="a360-label">
+    Quantity
+  </label>
+
+  <input
+    className={`a360-input ${
+      quantityError ? 'border-red-500 focus:border-red-500' : ''
+    }`}
+    type="number"
+    min="1"
+    max="500"
+    value={vrQuantity}
+    onChange={(e) => {
+      // Clear general form error when user edits quantity
+      setVrError('');
+
+      const value = e.target.value;
+
+      // Allow user to temporarily clear the field
+      if (value === '') {
+        setVrQuantity('');
+        setQuantityError('');
+        return;
+      }
+
+      const numValue = Number(value);
+
+      // IMPORTANT:
+      // Update the input value even when it is invalid.
+      // This prevents an old valid value from being shown
+      // together with a new validation error.
+      setVrQuantity(numValue);
+
+      // Validate minimum
+      if (numValue <= 0) {
+        setQuantityError(
+          'Quantity must be greater than 0'
+        );
+        return;
+      }
+
+      // Validate maximum
+      if (numValue > 500) {
+        setQuantityError(
+          'Quantity cannot exceed 500'
+        );
+        return;
+      }
+
+      // Valid value, remove previous error immediately
+      setQuantityError('');
+    }}
+    required
+  />
+
+  {quantityError && (
+    <p className="mt-1 text-sm text-red-600">
+      {quantityError}
+    </p>
+  )}
+</div>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="a360-label">Unit Cost (USD)</label>
-              <input className="a360-input" type="number" min="0" step="0.01" value={vrUnitCost} onChange={e => setVrUnitCost(Number(e.target.value))} placeholder="0.00" required />
-            </div>
+  <label className="a360-label">
+    Unit Cost (USD)
+  </label>
+
+  <input
+    className={`a360-input ${
+      unitCostError
+        ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+        : ''
+    }`}
+    type="number"
+    min="1"
+    max="10000"
+    step="0.01"
+    value={vrUnitCost}
+    onChange={(e) => {
+      // Clear general form error
+      setVrError('');
+
+      const value = e.target.value;
+
+      // Allow the field to be temporarily empty
+      if (value === '') {
+        setVrUnitCost('');
+        setUnitCostError('');
+        return;
+      }
+
+      const numValue = Number(value);
+
+      // IMPORTANT:
+      // Always update the state first
+      setVrUnitCost(numValue);
+
+      // Minimum validation
+      if (numValue <= 0) {
+        setUnitCostError(
+          'Unit Cost must be greater than 0'
+        );
+        return;
+      }
+
+      // Maximum validation
+      if (numValue > 10000) {
+        setUnitCostError(
+          'Unit Cost cannot exceed 10000 USD'
+        );
+        return;
+      }
+
+      // Valid value, remove old error immediately
+      setUnitCostError('');
+    }}
+    required
+  />
+
+  {unitCostError && (
+    <p className="mt-1 text-sm text-red-600">
+      {unitCostError}
+    </p>
+  )}
+</div>
             <div>
               <label className="a360-label">Total Cost</label>
               <div className="flex items-center justify-between font-semibold cursor-not-allowed a360-input bg-slate-50 text-slate-800">
@@ -190,7 +507,31 @@ export default function VendorOrderCreate() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="a360-label">Cognizant PO</label>
-              <input className="a360-input" type="text" value={vrCognizantPo} onChange={e => setVrCognizantPo(e.target.value)} placeholder="e.g. CGZ-PO-2026-00200" required />
+<input
+  className="a360-input"
+  type="text"
+  value={vrCognizantPo}
+onChange={(e) => {
+  setVrError('');
+
+  const value = e.target.value;
+
+  if (/[^A-Za-z0-9-]/.test(value)) {
+    setPoError('Special characters are not allowed');
+  } else {
+    setPoError('');
+  }
+
+  setVrCognizantPo(value);
+}}
+  placeholder="e.g. CGZ-PO-2026-00200"
+  required
+/>
+{poError && (
+  <p className="mt-1 text-sm text-red-600">
+    {poError}
+  </p>
+)}
             </div>
             <div>
               <label className="a360-label">Procurement Channel</label>
@@ -200,6 +541,7 @@ export default function VendorOrderCreate() {
                 <option>EDI</option>
               </select>
             </div>
+
           </div>
         </div>
 
@@ -215,8 +557,19 @@ export default function VendorOrderCreate() {
             </div>
             <div>
               <label className="a360-label">{vrDestination === 'Cognizant Warehouse' ? 'Cognizant Warehouse Address' : 'Client Office Address'}</label>
-              <textarea className="a360-input" rows={4} value={vrWarehouseAddress} onChange={e => setVrWarehouseAddress(e.target.value)} placeholder={vrDestination === 'Cognizant Warehouse' ? 'Enter Cognizant warehouse address...' : 'Enter client office delivery address...'} />
-            </div>
+              <textarea
+  className="a360-input"
+  rows={4}
+  value={vrWarehouseAddress}
+  minLength={vrDestination === 'Client Office' ? 20 : undefined}
+  maxLength={500}
+  onChange={(e) => setVrWarehouseAddress(e.target.value)}
+  placeholder={
+    vrDestination === 'Cognizant Warehouse'
+      ? 'Enter Cognizant warehouse address...'
+      : 'Enter client office delivery address (20-500 characters)...'
+  }
+/></div>
           </div>
         </div>
 
