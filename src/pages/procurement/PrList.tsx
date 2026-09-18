@@ -18,11 +18,10 @@ export default function PrList() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-slate-800">Purchase Requisitions</h1>
-          <p className="text-sm text-slate-500">Internal requests to procure against an approved Customer PO, netted against existing warehouse stock and open vendor orders. Approval here is required before a Cognizant PO can be raised to a vendor.</p>
-        </div>
+         </div>
         <Link to="/procurement/requisitions/new" className="a360-btn-primary">+ New Requisition</Link>
       </div>
-      <div className="a360-card p-3 flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 p-3 a360-card">
         {FILTERS.map(f => (
           <button key={f} onClick={() => setActive(f)}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${active===f?'bg-brand-600 text-white border-brand-600':'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
@@ -30,7 +29,7 @@ export default function PrList() {
           </button>
         ))}
       </div>
-      <div className="a360-card overflow-x-auto">
+      <div className="overflow-x-auto a360-card">
         <table className="w-full">
           <thead><tr>
             <th className="a360-th">PR ID</th><th className="a360-th">Customer PO</th><th className="a360-th">Catalog Item</th>
@@ -40,18 +39,18 @@ export default function PrList() {
           <tbody>
             {filtered.map(pr => (
               <tr key={pr.id} className="hover:bg-slate-50">
-                <td className="a360-td font-medium text-brand-700"><Link to={`/procurement/requisitions/${pr.id}`}>{pr.id}</Link></td>
+                <td className="font-medium a360-td text-brand-700"><Link to={`/procurement/requisitions/${pr.id}`}>{pr.id}</Link></td>
                 <td className="a360-td text-slate-500">{pr.poId}</td>
                 <td className="a360-td">{catName(pr.catalogItemId)}</td>
                 <td className="a360-td">{pr.requestedQty}</td>
                 <td className="a360-td text-slate-500">{pr.inStockQty}</td>
-                <td className="a360-td font-semibold">{pr.balanceQty}</td>
+                <td className="font-semibold a360-td">{pr.balanceQty}</td>
                 <td className="a360-td">${pr.estimatedTotalCost.toLocaleString()}</td>
                 <td className="a360-td"><StatusBadge status={pr.status} /></td>
                 <td className="a360-td"><button onClick={() => navigate(`/procurement/requisitions/${pr.id}`)} className="a360-btn-secondary text-xs px-2.5 py-1">Open</button></td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan={10} className="a360-td text-center text-slate-400 py-8">No requisitions in this state.</td></tr>}
+            {!filtered.length && <tr><td colSpan={10} className="py-8 text-center a360-td text-slate-400">No requisitions in this state.</td></tr>}
           </tbody>
         </table>
       </div>

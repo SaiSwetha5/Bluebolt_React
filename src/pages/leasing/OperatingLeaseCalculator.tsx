@@ -24,14 +24,13 @@ export default function OperatingLeaseCalculator() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold text-slate-800">Operating Lease Calculator</h1>
-          <p className="text-sm text-slate-500">LRF amortization engine — models the monthly payment for any asset cost, rate, term and residual value.</p>
-        </div>
-        <Link to="/receivables/subscriptions/new" className="a360-btn-secondary text-sm">Use this to create a subscription →</Link>
+         </div>
+        <Link to="/receivables/subscriptions/new" className="text-sm a360-btn-secondary">Use this to create a subscription →</Link>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="a360-card p-5 space-y-4 lg:col-span-1">
-          <h2 className="text-sm font-semibold text-slate-800 border-b border-slate-100 pb-2">Lease details</h2>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="p-5 space-y-4 a360-card lg:col-span-1">
+          <h2 className="pb-2 text-sm font-semibold border-b text-slate-800 border-slate-100">Lease details</h2>
           <div>
             <label className="a360-label">Asset cost</label>
             <input className="a360-input" type="number" min="0" step="0.01" value={assetCost} onChange={e => setAssetCost(Number(e.target.value))} />
@@ -54,19 +53,19 @@ export default function OperatingLeaseCalculator() {
           </div>
         </div>
 
-        <div className="a360-card p-5 space-y-3 lg:col-span-2">
-          <h2 className="text-sm font-semibold text-slate-800 border-b border-slate-100 pb-2">Lease summary</h2>
+        <div className="p-5 space-y-3 a360-card lg:col-span-2">
+          <h2 className="pb-2 text-sm font-semibold border-b text-slate-800 border-slate-100">Lease summary</h2>
           <dl className="grid grid-cols-2 gap-3 text-sm">
-            <div className="flex justify-between border-b border-slate-100 pb-2"><dt className="text-slate-500">Monthly lease payment</dt><dd className="font-semibold text-brand-700">${result.monthlyPayment.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
-            <div className="flex justify-between border-b border-slate-100 pb-2"><dt className="text-slate-500">Number of payments</dt><dd className="font-medium">{result.numberOfPayments}</dd></div>
-            <div className="flex justify-between border-b border-slate-100 pb-2"><dt className="text-slate-500">Total interest</dt><dd className="font-medium">${result.totalInterest.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
-            <div className="flex justify-between border-b border-slate-100 pb-2"><dt className="text-slate-500">Total cost of lease</dt><dd className="font-medium">${result.totalCostOfLease.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
-            <div className="flex justify-between border-b border-slate-100 pb-2"><dt className="text-slate-500">Residual value</dt><dd className="font-medium">${result.residualValue.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
+            <div className="flex justify-between pb-2 border-b border-slate-100"><dt className="text-slate-500">Monthly lease payment</dt><dd className="font-semibold text-brand-700">${result.monthlyPayment.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
+            <div className="flex justify-between pb-2 border-b border-slate-100"><dt className="text-slate-500">Number of payments</dt><dd className="font-medium">{result.numberOfPayments}</dd></div>
+            <div className="flex justify-between pb-2 border-b border-slate-100"><dt className="text-slate-500">Total interest</dt><dd className="font-medium">${result.totalInterest.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
+            <div className="flex justify-between pb-2 border-b border-slate-100"><dt className="text-slate-500">Total cost of lease</dt><dd className="font-medium">${result.totalCostOfLease.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
+            <div className="flex justify-between pb-2 border-b border-slate-100"><dt className="text-slate-500">Residual value</dt><dd className="font-medium">${result.residualValue.toLocaleString(undefined,{minimumFractionDigits:2})}</dd></div>
           </dl>
         </div>
       </div>
 
-      <div className="a360-card overflow-hidden">
+      <div className="overflow-hidden a360-card">
         <div className="px-4 py-3 border-b border-slate-100"><h2 className="text-sm font-semibold text-slate-800">Amortization schedule</h2></div>
         <AmortizationTable rows={result.schedule} />
       </div>

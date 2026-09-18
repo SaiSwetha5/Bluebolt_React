@@ -6,10 +6,11 @@ import StatusBadge from '../../components/ui/StatusBadge';
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export default function ArProcessing() {
-  const { receivableInvoices, receipts, customerSubscriptions, recordReceipt } = useData();
+  const { receivableInvoices, receipts, customerSubscriptions, recordReceipt, sendDunningReminder } = useData();
   const [receiptFor, setReceiptFor] = useState<string | null>(null);
   const [method, setMethod] = useState<'ACH' | 'WIRE' | 'CARD' | 'CHECK'>('ACH');
   const [reference, setReference] = useState('');
+  const [reminderNote, setReminderNote] = useState<string | null>(null);
 
   const today = useMemo(() => new Date(), []);
 
@@ -42,12 +43,35 @@ export default function ArProcessing() {
     setReceiptFor(null); setReference('');
   }
 
+  function remind(invoiceId: string) {
+    sendDunningReminder(invoiceId);
+    setReminderNote(`Reminder logged for ${invoiceId}.`);
+  }
+
+  function remindAllOverdue() {
+    const targets = overdue.map(r => r.inv.id);
+    targets.forEach(id => sendDunningReminder(id));
+    setReminderNote(targets.length ? `Sent ${targets.length} reminder(s) for overdue invoices.` : 'No overdue invoices to remind.');
+  }
+
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-lg font-bold text-slate-800">Accounts Receivable</h1>
-        <p className="text-sm text-slate-500">Customer invoice collections queue across all DaaS subscriptions.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-slate-800">Accounts Receivable</h1>
+          <p className="text-sm text-slate-500">Customer invoice collections queue across all DaaS subscriptions.</p>
+        </div>
+        <button className="a360-btn-secondary" onClick={remindAllOverdue} disabled={!overdue.length}>
+          Send Reminders to Overdue ({overdue.length})
+        </button>
       </div>
+
+      {reminderNote && (
+        <div className="a360-card p-3 text-sm bg-amber-50/60 border-amber-100 text-amber-800 flex items-center justify-between">
+          <span>{reminderNote}</span>
+          <button className="text-xs text-amber-700 hover:underline" onClick={() => setReminderNote(null)}>Dismiss</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-4 gap-4">
         <div className="a360-card p-4">
@@ -104,10 +128,10 @@ export default function ArProcessing() {
             <th className="a360-th">Invoice</th><th className="a360-th">Customer</th><th className="a360-th">Subscription</th>
             <th className="a360-th">Period</th><th className="a360-th">Amount</th><th className="a360-th">Issue Date</th>
             <th className="a360-th">Due Date</th><th className="a360-th">Days Overdue</th><th className="a360-th">Status</th>
-            <th className="a360-th">Receipt</th><th className="a360-th"></th>
+            <th className="a360-th">Receipt</th><th className="a360-th">Reminders</th><th className="a360-th"></th>
           </tr></thead>
           <tbody>
-            {rows.map(({ inv, daysOverdue, displayStatus }) => {
+            {rows.map(({ inv, daysOverdue, isOverdue, displayStatus }) => {
               const receipt = receipts.find(r => r.id === inv.receiptId);
               return (
                 <tr key={inv.id} className="hover:bg-slate-50">
@@ -121,25 +145,35 @@ export default function ArProcessing() {
                   <td className="a360-td text-slate-500">{inv.status !== 'PAID' && daysOverdue > 0 ? `${daysOverdue}d` : '—'}</td>
                   <td className="a360-td"><StatusBadge status={displayStatus} /></td>
                   <td className="a360-td text-slate-500">{receipt ? `${receipt.method} · ${receipt.reference}` : '—'}</td>
+                  <td className="a360-td text-slate-500">
+                    {inv.reminderCount
+                      ? <span>{inv.reminderCount}x · last {inv.lastReminderAt ? new Date(inv.lastReminderAt).toLocaleDateString() : '—'}</span>
+                      : '—'}
+                  </td>
                   <td className="a360-td text-right">
-                    {inv.status !== 'PAID' && receiptFor !== inv.id && (
-                      <button className="a360-btn-primary !py-1 !px-2 text-xs" onClick={() => setReceiptFor(inv.id)}>Record Receipt</button>
-                    )}
-                    {receiptFor === inv.id && (
-                      <div className="flex gap-1 justify-end">
-                        <select className="a360-input !py-1 !w-24 text-xs" value={method} onChange={e => setMethod(e.target.value as any)}>
-                          <option>ACH</option><option>WIRE</option><option>CARD</option><option>CHECK</option>
-                        </select>
-                        <input className="a360-input !py-1 !w-28 text-xs" placeholder="Reference" value={reference} onChange={e => setReference(e.target.value)} />
-                        <button className="a360-btn-primary !py-1 !px-2 text-xs" onClick={() => submitReceipt(inv.id)}>Save</button>
-                        <button className="a360-btn-secondary !py-1 !px-2 text-xs" onClick={() => { setReceiptFor(null); setReference(''); }}>Cancel</button>
-                      </div>
-                    )}
+                    <div className="flex gap-1 justify-end">
+                      {isOverdue && receiptFor !== inv.id && (
+                        <button className="a360-btn-secondary !py-1 !px-2 text-xs" onClick={() => remind(inv.id)}>Send Reminder</button>
+                      )}
+                      {inv.status !== 'PAID' && receiptFor !== inv.id && (
+                        <button className="a360-btn-primary !py-1 !px-2 text-xs" onClick={() => setReceiptFor(inv.id)}>Record Receipt</button>
+                      )}
+                      {receiptFor === inv.id && (
+                        <div className="flex gap-1 justify-end">
+                          <select className="a360-input !py-1 !w-24 text-xs" value={method} onChange={e => setMethod(e.target.value as any)}>
+                            <option>ACH</option><option>WIRE</option><option>CARD</option><option>CHECK</option>
+                          </select>
+                          <input className="a360-input !py-1 !w-28 text-xs" placeholder="Reference" value={reference} onChange={e => setReference(e.target.value)} />
+                          <button className="a360-btn-primary !py-1 !px-2 text-xs" onClick={() => submitReceipt(inv.id)}>Save</button>
+                          <button className="a360-btn-secondary !py-1 !px-2 text-xs" onClick={() => { setReceiptFor(null); setReference(''); }}>Cancel</button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
-            {!rows.length && <tr><td colSpan={11} className="a360-td text-center text-slate-400 py-8">No receivable invoices issued yet.</td></tr>}
+            {!rows.length && <tr><td colSpan={12} className="a360-td text-center text-slate-400 py-8">No receivable invoices issued yet.</td></tr>}
           </tbody>
         </table>
       </div>

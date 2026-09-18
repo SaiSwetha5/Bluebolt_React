@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState, useMemo, useCallback, useRe
 import type {
   PurchaseOrder, PurchaseRequisition, VendorOrder, GoodsReceipt, VendorInvoice,
   LeaseSchedule, AssetRecord, AuditLogEntry, CatalogItem, AuditAction,
-  VendorName, ShipmentStatus, PrStatus, ModelCategory, PrNotification, ServiceClass, ReportingHierarchy
+  VendorName, ShipmentStatus, PrStatus, ModelCategory, PrNotification, ServiceClass, ReportingHierarchy,
+  VendorPayment, PaymentMethod,
 } from '../types/models';
 import { PROCUREMENT_MAILBOX } from '../types/models';
 // --- Continuation modules: DaaS Receivables & Account Management (additive) ---
@@ -10,7 +11,7 @@ import type {
   CustomerSubscription, ReceivableInvoice, Receipt,
   AppUser, SystemRole, VendorAccount, CustomerAccount, SsoProvider,
 } from '../types/models';
-import { calculateOperatingLease } from '../utils/leaseCalculator';
+import { calculateOperatingLease, addMonthsIso } from '../utils/leaseCalculator';
 
 function pad(n: number, len = 5): string { return n.toString().padStart(len, '0'); }
 
@@ -21,6 +22,7 @@ export interface DataContextValue {
   vendorOrders: VendorOrder[];
   goodsReceipts: GoodsReceipt[];
   invoices: VendorInvoice[];
+  vendorPayments: VendorPayment[];
   leaseSchedules: LeaseSchedule[];
   assets: AssetRecord[];
   auditLog: AuditLogEntry[];
@@ -64,6 +66,16 @@ export interface DataContextValue {
   submitInvoice: (input: Omit<VendorInvoice,'id'|'status'|'matchResult'>) => VendorInvoice;
   approveInvoicePayment: (invoiceId: string, approver: string) => void;
   markInvoicePaid: (invoiceId: string) => void;
+  // Pay one or more APPROVED_FOR_PAYMENT invoices in a single run,
+  // capturing how the payment was made (mirrors AR's recordReceipt).
+  // Automatically triggers recurring invoice generation for any lease-linked
+  // invoice in the batch once payment is recorded.
+  payInvoices: (invoiceIds: string[], method: PaymentMethod, reference: string) => VendorPayment | null;
+  // Automated recurring AP billing: manually trigger the next-period invoice
+  // for a given lease schedule (also called automatically by payInvoices).
+  generateRecurringVendorInvoice: (leaseScheduleId: string) => VendorInvoice | null;
+  // Dunning: log a payment reminder against an overdue, unpaid payable.
+  sendApDunningReminder: (invoiceId: string) => VendorInvoice | null;
   createLeaseSchedule: (input: Omit<LeaseSchedule,'id'|'status'>) => LeaseSchedule;
   assignAsset: (assetId: string, user: string, location: string) => void;
   retireAsset: (assetId: string) => void;
@@ -75,7 +87,12 @@ export interface DataContextValue {
   receipts: Receipt[];
   createCustomerSubscription: (input: { customerAccountId: string; customerName: string; assetId: string; catalogItemId: string; serviceClass: CustomerSubscription['serviceClass']; assetCost: number; annualInterestRatePct: number; termYears: number; residualValue: number; startDate: string; billingDay: number }) => CustomerSubscription;
   generateReceivableInvoice: (subscriptionId: string) => ReceivableInvoice | null;
+  // Automated recurring billing: generate an invoice for every active
+  // subscription whose next period is due, in one call.
+  generateDueReceivableInvoices: () => { generated: number; subscriptionIds: string[] };
   recordReceipt: (invoiceId: string, method: Receipt['method'], reference: string) => Receipt | null;
+  // Dunning: log a reminder against an overdue receivable invoice.
+  sendDunningReminder: (invoiceId: string) => ReceivableInvoice | null;
 
   // --- Account Management ---
   users: AppUser[];
@@ -97,12 +114,15 @@ export function useData(): DataContextValue {
 }
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const counters = useRef({ po: 417, req: 900, vo: 118, grn: 212, inv: 8821, ls: 41, ast: 451, audit: 1, pr: 301, notif: 1 });
+  const counters = useRef({ po: 417, req: 900, vo: 118, grn: 212, inv: 8821, ls: 41, ast: 451, audit: 1, pr: 301, notif: 1, vpay: 1 });
   const [purchaseOrders, setPOs] = useState<PurchaseOrder[]>([]);
   const [purchaseRequisitions, setPRs] = useState<PurchaseRequisition[]>([]);
   const [vendorOrders, setVOs] = useState<VendorOrder[]>([]);
   const [goodsReceipts, setGRNs] = useState<GoodsReceipt[]>([]);
   const [invoices, setInvoices] = useState<VendorInvoice[]>([]);
+  const [vendorPayments, setVendorPayments] = useState<VendorPayment[]>([]);
+  const vendorPaymentsRef = useRef<VendorPayment[]>([]);
+  const setVendorPayments2 = (fn: (l: VendorPayment[]) => VendorPayment[]) => { const n = fn(vendorPaymentsRef.current); vendorPaymentsRef.current = n; setVendorPayments(n); };
   const [leaseSchedules, setLeases] = useState<LeaseSchedule[]>([]);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
@@ -130,12 +150,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const invoicesRef = useRef<VendorInvoice[]>([]);
   const auditRef = useRef<AuditLogEntry[]>([]);
   const catalogRef = useRef<CatalogItem[]>([]);
+  const leasesRef = useRef<LeaseSchedule[]>([]);
 
   const setPOs2 = (fn: (l: PurchaseOrder[]) => PurchaseOrder[]) => { const n = fn(posRef.current); posRef.current = n; setPOs(n); };
   const setPRs2 = (fn: (l: PurchaseRequisition[]) => PurchaseRequisition[]) => { const n = fn(prsRef.current); prsRef.current = n; setPRs(n); };
   const setVOs2 = (fn: (l: VendorOrder[]) => VendorOrder[]) => { const n = fn(vosRef.current); vosRef.current = n; setVOs(n); };
   const setAssets2 = (fn: (l: AssetRecord[]) => AssetRecord[]) => { const n = fn(assetsRef.current); assetsRef.current = n; setAssets(n); };
   const setInvoices2 = (fn: (l: VendorInvoice[]) => VendorInvoice[]) => { const n = fn(invoicesRef.current); invoicesRef.current = n; setInvoices(n); };
+  const setLeases2 = (fn: (l: LeaseSchedule[]) => LeaseSchedule[]) => { const n = fn(leasesRef.current); leasesRef.current = n; setLeases(n); };
 
   const logAudit = useCallback((action: AuditAction, entityType: AuditLogEntry['entityType'], entityId: string, details: string, actor = 'system') => {
     const entry: AuditLogEntry = { id: 'AUD-' + pad(counters.current.audit++), timestamp: new Date().toISOString(), action, entityType, entityId, actor, details };
@@ -338,10 +360,82 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const markInvoicePaid = useCallback((invoiceId: string) => setInvoices2(l => l.map(i => i.id === invoiceId ? { ...i, status: 'PAID' } : i)), []);
 
+  // Automated recurring invoice generation: once a payment against an
+  // invoice tied to a lease schedule clears, automatically raise the next
+  // period's invoice on that same lease (if the term isn't finished yet).
+  // Cloned invoices skip the 3-way match step (they're system-generated
+  // against an already-established lease) and land straight in MATCHED,
+  // ready to move through approval like any other payable.
+  const generateRecurringVendorInvoice = useCallback((leaseScheduleId: string): VendorInvoice | null => {
+    const lease = leasesRef.current.find(l => l.id === leaseScheduleId);
+    if (!lease) return null;
+    const nextPeriod = lease.nextInvoicePeriod ?? 2;
+    if (lease.status === 'CLOSED' || nextPeriod > lease.termMonths) return null;
+    const seed = invoicesRef.current.find(i => i.leaseScheduleId === leaseScheduleId) || invoicesRef.current.find(i => i.id === lease.invoiceId);
+    if (!seed) return null;
+    const issueDate = new Date().toISOString().slice(0, 10);
+    const due = new Date(issueDate); due.setDate(due.getDate() + 30);
+    const invoice: VendorInvoice = {
+      id: 'INV-' + lease.vendor.toUpperCase() + '-' + pad(counters.current.inv++, 5),
+      vendor: lease.vendor, vendorOrderId: seed.vendorOrderId, grnId: seed.grnId, poId: seed.poId,
+      amount: lease.monthlyPayment, currency: 'USD', invoiceDate: issueDate, dueDate: due.toISOString().slice(0, 10),
+      status: 'MATCHED', leaseScheduleId: lease.id,
+      matchResult: { poMatch: true, podMatch: true, grnMatch: true },
+      recurring: true, period: nextPeriod, totalPeriods: lease.termMonths,
+    };
+    setInvoices2(l => [invoice, ...l]);
+    setLeases2(l => l.map(ls => ls.id === lease.id ? { ...ls, nextInvoicePeriod: nextPeriod + 1 } : ls));
+    logEvent('RECURRING_AP_INVOICE_GENERATED', 'Invoice', invoice.id,
+      `Recurring invoice ${invoice.id} auto-generated for ${lease.vendor} on lease ${lease.id}, period ${nextPeriod}/${lease.termMonths}: $${invoice.amount.toLocaleString()}.`);
+    return invoice;
+  }, [logAudit]);
+
+  const payInvoices = useCallback((invoiceIds: string[], method: PaymentMethod, reference: string): VendorPayment | null => {
+    const targets = invoicesRef.current.filter(i => invoiceIds.includes(i.id) && i.status === 'APPROVED_FOR_PAYMENT');
+    if (!targets.length) return null;
+    const totalAmount = targets.reduce((s, i) => s + i.amount, 0);
+    const vendors = Array.from(new Set(targets.map(i => i.vendor)));
+    const paidAt = new Date().toISOString();
+    const payment: VendorPayment = {
+      id: 'VPAY-' + pad(counters.current.vpay++),
+      invoiceIds: targets.map(i => i.id),
+      vendor: vendors.length === 1 ? vendors[0] : 'MULTIPLE',
+      totalAmount, method, reference, paidAt,
+    };
+    setVendorPayments2(l => [payment, ...l]);
+    setInvoices2(l => l.map(i => invoiceIds.includes(i.id) && i.status === 'APPROVED_FOR_PAYMENT'
+      ? { ...i, status: 'PAID', paymentId: payment.id, paymentMethod: method, paymentReference: reference, paidAt }
+      : i));
+    logEvent('VENDOR_PAYMENT_RECORDED', 'VendorPayment', payment.id,
+      `Paid ${targets.length} invoice(s) totaling $${totalAmount.toLocaleString()} via ${method} (ref ${reference}): ${targets.map(i => i.id).join(', ')}.`);
+    // Once payment clears, automatically kick off the next period's invoice
+    // for any lease-linked payable in this batch.
+    const leaseIds = Array.from(new Set(targets.map(i => i.leaseScheduleId).filter((id): id is string => !!id)));
+    leaseIds.forEach(leaseScheduleId => generateRecurringVendorInvoice(leaseScheduleId));
+    return payment;
+  }, [logAudit, generateRecurringVendorInvoice]);
+
+  // Dunning for payables: log an internal reminder against a payable that's
+  // past due and still unpaid (mirrors AR's sendDunningReminder, applied to
+  // the AP side so Finance can track who's been chased and when).
+  const sendApDunningReminder = useCallback((invoiceId: string): VendorInvoice | null => {
+    const inv = invoicesRef.current.find(i => i.id === invoiceId);
+    if (!inv || inv.status === 'PAID') return null;
+    const sentAt = new Date().toISOString();
+    let updated: VendorInvoice | undefined;
+    setInvoices2(l => l.map(i => {
+      if (i.id !== invoiceId) return i;
+      updated = { ...i, reminderCount: (i.reminderCount ?? 0) + 1, lastReminderAt: sentAt };
+      return updated;
+    }));
+    logEvent('DUNNING_REMINDER_SENT', 'Invoice', invoiceId, `Payment reminder #${(inv.reminderCount ?? 0) + 1} logged for ${inv.vendor} invoice ${invoiceId} ($${inv.amount.toLocaleString()}).`);
+    return updated ?? null;
+  }, [logAudit]);
+
   const createLeaseSchedule = useCallback((input: Omit<LeaseSchedule,'id'|'status'>): LeaseSchedule => {
-    const ls: LeaseSchedule = { ...input, id: 'LS-' + input.vendor.toUpperCase() + '-2026-' + pad(counters.current.ls++, 3), status: 'PENDING' };
-    setLeases(l => [ls, ...l]);
-    setInvoices2(l => l.map(i => i.id === input.invoiceId ? { ...i, leaseScheduleId: ls.id } : i));
+    const ls: LeaseSchedule = { ...input, id: 'LS-' + input.vendor.toUpperCase() + '-2026-' + pad(counters.current.ls++, 3), status: 'PENDING', nextInvoicePeriod: 2 };
+    setLeases2(l => [ls, ...l]);
+    setInvoices2(l => l.map(i => i.id === input.invoiceId ? { ...i, leaseScheduleId: ls.id, period: 1, totalPeriods: ls.termMonths } : i));
     logAudit('LEASE_SCHEDULE_CREATED', 'Lease', ls.id, `Lease schedule created: ${ls.termMonths} months @ ${ls.monthlyPayment}/mo.`);
     const invoice = invoicesRef.current.find(i => i.id === input.invoiceId);
     if (invoice) setAssets2(l => l.map(a => a.poId === invoice.poId ? { ...a, leaseStartDate: ls.startDate, leaseEndDate: ls.endDate, contract: ls.id } : a));
@@ -369,7 +463,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const calc = calculateOperatingLease({ assetCost: input.assetCost, annualInterestRatePct: input.annualInterestRatePct, termYears: input.termYears, startDate: input.startDate, residualValue: input.residualValue });
     const endDate = calc.schedule.length ? calc.schedule[calc.schedule.length - 1].paymentDate : input.startDate;
     const sub: CustomerSubscription = {
-      id: 'SUB-2026-' + pad(counters2.current.sub++, 4), customerAccountId: input.customerAccountId, customerName: input.customerName,
+      id: 'LEASE-2026-' + pad(counters2.current.sub++, 4), customerAccountId: input.customerAccountId, customerName: input.customerName,
       assetId: input.assetId, catalogItemId: input.catalogItemId, serviceClass: input.serviceClass,
       assetCost: input.assetCost, annualInterestRatePct: input.annualInterestRatePct, termMonths: calc.numberOfPayments,
       residualValue: input.residualValue, monthlyPayment: calc.monthlyPayment, startDate: input.startDate, endDate,
@@ -397,6 +491,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return inv;
   }, [logAudit]);
 
+  // Automated recurring invoice generation: run through every ACTIVE
+  // subscription and bill whichever periods are due today, in one pass.
+  // "Due" = the period's scheduled billing date (start date + N months)
+  // has arrived. This is the equivalent of a nightly/monthly billing job,
+  // triggered manually from the UI for this demo.
+  const generateDueReceivableInvoices = useCallback((): { generated: number; subscriptionIds: string[] } => {
+    const today = new Date().toISOString().slice(0, 10);
+    const due = subsRef.current.filter(s =>
+      s.status === 'ACTIVE' &&
+      s.nextInvoicePeriod <= s.termMonths &&
+      addMonthsIso(s.startDate, s.nextInvoicePeriod) <= today
+    );
+    const subscriptionIds: string[] = [];
+    due.forEach(s => {
+      const inv = generateReceivableInvoice(s.id);
+      if (inv) subscriptionIds.push(s.id);
+    });
+    if (subscriptionIds.length) {
+      logEvent('RECURRING_BILLING_RUN', 'ReceivableInvoice', 'BULK', `Automated billing run generated ${subscriptionIds.length} invoice(s) for due subscriptions.`);
+    }
+    return { generated: subscriptionIds.length, subscriptionIds };
+  }, [generateReceivableInvoice]);
+
   const recordReceipt = useCallback((invoiceId: string, method: Receipt['method'], reference: string): Receipt | null => {
     const inv = rInvoicesRef.current.find(i => i.id === invoiceId);
     if (!inv) return null;
@@ -405,6 +522,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setRInvoices2(l => l.map(i => i.id === invoiceId ? { ...i, status: 'PAID', receiptId: receipt.id } : i));
     logEvent('RECEIPT_RECORDED', 'Receipt', receipt.id, `Payment received against ${invoiceId}: $${receipt.amount} via ${method} (ref ${reference}).`);
     return receipt;
+  }, [logAudit]);
+
+  // Dunning: record that a reminder went out for an overdue invoice. Keeps a
+  // running count + last-sent timestamp so collections staff can see who's
+  // already been chased and when.
+  const sendDunningReminder = useCallback((invoiceId: string): ReceivableInvoice | null => {
+    const inv = rInvoicesRef.current.find(i => i.id === invoiceId);
+    if (!inv || inv.status === 'PAID') return null;
+    const sentAt = new Date().toISOString();
+    let updated: ReceivableInvoice | undefined;
+    setRInvoices2(l => l.map(i => {
+      if (i.id !== invoiceId) return i;
+      updated = { ...i, reminderCount: (i.reminderCount ?? 0) + 1, lastReminderAt: sentAt };
+      return updated;
+    }));
+    logEvent('DUNNING_REMINDER_SENT', 'ReceivableInvoice', invoiceId, `Reminder #${(inv.reminderCount ?? 0) + 1} sent to ${inv.customerName} for ${invoiceId} ($${inv.amount.toLocaleString()}).`);
+    return updated ?? null;
   }, [logAudit]);
 
   // --- Account Management: Users, Roles, Vendor & Customer Accounts ---
@@ -517,22 +651,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     addEventSeed(vo1.id, 'OUT_FOR_DELIVERY', 'Chennai Regional Hub');
     addEventSeed(vo1.id, 'DELIVERED', 'Cognizant Warehouse - Chennai');
     const grn1 = createGRNSeed({ vendorOrderId:vo1.id, poId:po1.id, quantityReceived:100, quantityExpected:100, receivedBy:'Warehouse Ops - S. Iyer', podFileName:'POD_HP_VO2026-00118.pdf', condition:'Good' });
-    const inv1: VendorInvoice = { id:'INV-HP-08821', vendor:'HP', vendorOrderId:vo1.id, grnId:grn1.id, poId:po1.id, amount:154000, currency:'USD', invoiceDate:'2026-08-05', dueDate:'2026-09-04', status:'APPROVED_FOR_PAYMENT', matchResult:{ poMatch:true, podMatch:true, grnMatch:true } };
+    const ls1: LeaseSchedule = { id:'LS-HP-2026-041', vendor:'HP', invoiceId:'INV-HP-08821', termMonths:36, monthlyPayment:4278, startDate:'2026-08-10', endDate:'2029-08-10', status:'ACTIVE', nextInvoicePeriod:2 };
+    const inv1: VendorInvoice = { id:'INV-HP-08821', vendor:'HP', vendorOrderId:vo1.id, grnId:grn1.id, poId:po1.id, amount:154000, currency:'USD', invoiceDate:'2026-08-05', dueDate:'2026-09-04', status:'PAID', leaseScheduleId:ls1.id, matchResult:{ poMatch:true, podMatch:true, grnMatch:true }, period:1, totalPeriods:36 };
     invoicesRef.current = [inv1, ...invoicesRef.current]; setInvoices([...invoicesRef.current]);
-    const ls1: LeaseSchedule = { id:'LS-HP-2026-041', vendor:'HP', invoiceId:inv1.id, termMonths:36, monthlyPayment:4278, startDate:'2026-08-10', endDate:'2029-08-10', status:'PENDING' };
-    setLeases([ls1]);
-    assetsRef.current = assetsRef.current.map((a, i) => i < 3 ? { ...a, assignedUser:`Employee-${1000+i}`, location:'Chennai Branch Office', lifecycleStatus:'DEPLOYED' } : a);
+    leasesRef.current = [ls1]; setLeases(leasesRef.current);
+    assetsRef.current = assetsRef.current.map((a, i) => i < 3 ? { ...a, assignedUser:`Employee-${1000+i}`, location:'Chennai Branch Office', lifecycleStatus:'DEPLOYED', contract:ls1.id, leaseStartDate:ls1.startDate, leaseEndDate:ls1.endDate } : a);
     setAssets([...assetsRef.current]);
 
     // Scenario 2
     intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88250', source:'PDF_IMPORT', fileName:'MFG_PO_88250.pdf', catalogItemId:'CAT-14STD', quantity:40, unitCost:1585, notes:'New hire cohort - Q4.' });
 
-    // Scenario 3
+    // Scenario 3 — Invoice & Lease example: 3-way match MATCHED and sitting in the AP "Awaiting Approval" queue,
+    // ready for a live walkthrough of Approve Payment -> Add Lease Schedule -> Mark Paid.
     const po3 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88199', source:'API', catalogItemId:'CAT-14STD', quantity:15, unitCost:1585, notes:'Early pilot batch.' });
     approvePOSeed(po3.id, 'A. Subramanian (Cognizant)');
-    const vo3 = createVOSeed({ poId:po3.id, requestId:po3.requestId!, vendor:'HP', vendorSku:'C2ZK6EC', channel:'Webshop Portal', quantity:15, unitCost:1585, destination:'Cognizant Warehouse', catalogItemId:po3.catalogItemId });
+    const vo3 = createVOSeed({ poId:po3.id, requestId:po3.requestId!, vendor:'HP', vendorSku:'C40DKEC', channel:'Webshop Portal', quantity:15, unitCost:1420, destination:'Cognizant Warehouse', catalogItemId:po3.catalogItemId });
     vosRef.current = vosRef.current.map(v => v.id === vo3.id ? { ...v, status:'SUBMITTED', submittedAt:new Date().toISOString() } : v); setVOs([...vosRef.current]);
     vosRef.current = vosRef.current.map(v => v.id === vo3.id ? { ...v, status:'CONFIRMED', confirmedAt:new Date().toISOString(), eta:'2026-08-25' } : v); setVOs([...vosRef.current]);
+    addEventSeed(vo3.id, 'LABEL_CREATED', 'HP Fulfillment Center, TX');
+    addEventSeed(vo3.id, 'IN_TRANSIT', 'Memphis, TN');
+    addEventSeed(vo3.id, 'DELIVERED', 'Cognizant Warehouse - Chennai');
+    const grn3 = createGRNSeed({ vendorOrderId:vo3.id, poId:po3.id, quantityReceived:15, quantityExpected:15, receivedBy:'Warehouse Ops - S. Iyer', podFileName:'POD_HP_' + vo3.id + '.pdf', condition:'Good' });
+    const inv2: VendorInvoice = { id:'INV-HP-' + pad(counters.current.inv++, 5), vendor:'HP', vendorOrderId:vo3.id, grnId:grn3.id, poId:po3.id, amount:15 * 1420, currency:'USD', invoiceDate:'2026-09-10', dueDate:'2026-10-10', status:'MATCHED', matchResult:{ poMatch:true, podMatch:true, grnMatch:true } };
+    invoicesRef.current = [inv2, ...invoicesRef.current]; setInvoices([...invoicesRef.current]);
 
     // Scenario 4
     const po4 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88301', source:'API', catalogItemId:'CAT-CONV', quantity:50, unitCost:1540, notes:'Q3 expansion.' });
@@ -547,6 +688,33 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const inStockQty5 = assetsRef.current.filter(a => a.catalogItemId === 'CAT-14STD' && a.lifecycleStatus === 'IN_STOCK' && a.location === 'Cognizant Warehouse').length;
     const pr5: PurchaseRequisition = { id:'PR-2026-' + pad(counters.current.pr++), poId:po5.id, requestId:po5.requestId!, catalogItemId:'CAT-14STD', requestedQty:25, inStockQty:inStockQty5, onOrderQty:0, balanceQty:Math.max(25-inStockQty5,0), preferredVendor:'Dell', estimatedUnitCost:1585, estimatedTotalCost:Math.max(25-inStockQty5,0)*1585, costCenter:'CC-FIN-02', justification:'Finance team annual device refresh.', requestedBy:'R. Nair', requestedAt:new Date().toISOString(), status:'PENDING_APPROVAL', emailedTo:'a.subramanian@cognizant.com', emailedAt:new Date().toISOString(), approvalNotificationSentTo:PROCUREMENT_MAILBOX, approvalNotificationSentAt:new Date().toISOString() };
     prsRef.current = [pr5, ...prsRef.current]; setPRs([...prsRef.current]);
+
+    // Scenario 6 — live GRN screen example: a Dell shipment that has reached the warehouse but has not
+    // been received yet, so "Delivered Orders Awaiting Intake" on the Goods Receipt screen is never empty.
+    const po6 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88362', source:'API', catalogItemId:'CAT-CONV', quantity:30, unitCost:1899, notes:'Executive convertible refresh - APAC leadership team.' });
+    approvePOSeed(po6.id, 'A. Subramanian (Cognizant)');
+    const vo6 = createVOSeed({ poId:po6.id, requestId:po6.requestId!, vendor:'Dell', vendorSku:'LAT7440-U5-14', channel:'Integrated Procurement API', quantity:30, unitCost:1510, destination:'Cognizant Warehouse', catalogItemId:po6.catalogItemId });
+    vosRef.current = vosRef.current.map(v => v.id === vo6.id ? { ...v, status:'SUBMITTED', submittedAt:new Date().toISOString() } : v); setVOs([...vosRef.current]);
+    vosRef.current = vosRef.current.map(v => v.id === vo6.id ? { ...v, status:'CONFIRMED', confirmedAt:new Date().toISOString(), eta:'2026-09-14' } : v); setVOs([...vosRef.current]);
+    addEventSeed(vo6.id, 'LABEL_CREATED', 'Dell Fulfillment Center, TX');
+    addEventSeed(vo6.id, 'IN_TRANSIT', 'Singapore Air Hub');
+    addEventSeed(vo6.id, 'OUT_FOR_DELIVERY', 'Chennai Regional Hub');
+    addEventSeed(vo6.id, 'DELIVERED', 'Cognizant Warehouse - Chennai');
+    // Intentionally left un-received — this is the example shipment waiting on the Goods Receipt screen.
+
+    // Scenario 7 — Accounts Payable exception example: GRN captured without proof of delivery, so the
+    // 3-way match fails and the invoice lands in AP as an EXCEPTION requiring follow-up.
+    const po7 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88410', source:'API', catalogItemId:'CAT-CONV', quantity:12, unitCost:1899, notes:'Regional sales team refresh.' });
+    approvePOSeed(po7.id, 'A. Subramanian (Cognizant)');
+    const vo7 = createVOSeed({ poId:po7.id, requestId:po7.requestId!, vendor:'Lenovo', vendorSku:'X13G5-U5-14', channel:'EDI', quantity:12, unitCost:1495, destination:'Cognizant Warehouse', catalogItemId:po7.catalogItemId });
+    vosRef.current = vosRef.current.map(v => v.id === vo7.id ? { ...v, status:'SUBMITTED', submittedAt:new Date().toISOString() } : v); setVOs([...vosRef.current]);
+    vosRef.current = vosRef.current.map(v => v.id === vo7.id ? { ...v, status:'CONFIRMED', confirmedAt:new Date().toISOString(), eta:'2026-09-08' } : v); setVOs([...vosRef.current]);
+    addEventSeed(vo7.id, 'LABEL_CREATED', 'Lenovo Fulfillment Center, Singapore');
+    addEventSeed(vo7.id, 'IN_TRANSIT', 'Singapore Air Hub');
+    addEventSeed(vo7.id, 'DELIVERED', 'Cognizant Warehouse - Chennai');
+    const grn7 = createGRNSeed({ vendorOrderId:vo7.id, poId:po7.id, quantityReceived:12, quantityExpected:12, receivedBy:'Warehouse Ops - S. Iyer', condition:'Good' });
+    const inv3: VendorInvoice = { id:'INV-LENOVO-' + pad(counters.current.inv++, 5), vendor:'Lenovo', vendorOrderId:vo7.id, grnId:grn7.id, poId:po7.id, amount:12 * 1495, currency:'USD', invoiceDate:'2026-09-12', dueDate:'2026-10-12', status:'EXCEPTION', matchResult:{ poMatch:true, podMatch:false, grnMatch:true, variance:'Missing supporting document(s) for 3-way match (no proof of delivery on file).' } };
+    invoicesRef.current = [inv3, ...invoicesRef.current]; setInvoices([...invoicesRef.current]);
 
     // --- Continuation modules seed data ---
     // Account Management: users, roles are seeded via RoleDefinition constants in the Accounts pages.
@@ -574,12 +742,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     counters2.current.cac = 2;
     setCustomerAccounts(seedCustomerAccounts);
 
-    // DaaS Receivables: one active subscription against a deployed asset, with one invoice already paid.
-    const deployedAsset = assetsRef.current.find(a => a.lifecycleStatus === 'DEPLOYED');
+    // DaaS Receivables: two deployed assets from Scenario 1 become customer subscriptions.
+    // Sub 1 has billing history (one paid period, one overdue, one just issued) to demo AR aging.
+    // Sub 2 is brand new with nothing billed yet, ready for a live "Generate Invoice" walkthrough.
+    const deployedAssets = assetsRef.current.filter(a => a.lifecycleStatus === 'DEPLOYED');
+    const [deployedAsset, deployedAsset2] = deployedAssets;
     if (deployedAsset) {
       const subCalc = calculateOperatingLease({ assetCost: 1540, annualInterestRatePct: 7, termYears: 3, startDate: '2026-06-01', residualValue: 200 });
       const seedSub: CustomerSubscription = {
-        id:'SUB-2026-0001', customerAccountId:'CAC-001', customerName:'Meridian Financial Group',
+        id:'LEASE-2026-0001', customerAccountId:'CAC-001', customerName:'Meridian Financial Group',
         assetId: deployedAsset.assetId, catalogItemId: deployedAsset.catalogItemId, serviceClass:'DaaS Standard',
         assetCost:1540, annualInterestRatePct:7, termMonths:subCalc.numberOfPayments, residualValue:200,
         monthlyPayment:subCalc.monthlyPayment, startDate:'2026-06-01',
@@ -599,6 +770,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const seedReceipt: Receipt = { id:'RCPT-00001', invoiceId:seedInv.id, subscriptionId:seedSub.id, amount:seedInv.amount, receivedAt:'2026-07-10T00:00:00.000Z', method:'ACH', reference:'ACH-REF-88213' };
       setReceipts([seedReceipt]);
       counters2.current.rcpt = 2;
+
+      if (deployedAsset2) {
+        const subCalc2 = calculateOperatingLease({ assetCost: 1540, annualInterestRatePct: 6.5, termYears: 3, startDate: '2026-09-01', residualValue: 200 });
+        const seedSub2: CustomerSubscription = {
+          id:'LEASE-2026-0002', customerAccountId:'CAC-001', customerName:'Meridian Financial Group',
+          assetId: deployedAsset2.assetId, catalogItemId: deployedAsset2.catalogItemId, serviceClass:'DaaS Premium',
+          assetCost:1540, annualInterestRatePct:6.5, termMonths:subCalc2.numberOfPayments, residualValue:200,
+          monthlyPayment:subCalc2.monthlyPayment, startDate:'2026-09-01',
+          endDate: subCalc2.schedule[subCalc2.schedule.length - 1].paymentDate, billingDay:1,
+          status:'ACTIVE', nextInvoicePeriod:1, createdAt:'2026-09-01T00:00:00.000Z',
+        };
+        subsRef.current = [seedSub2, ...subsRef.current]; setSubs([...subsRef.current]);
+        counters2.current.sub = 3;
+      }
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -621,18 +806,18 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const value: DataContextValue = {
     purchaseOrders, purchaseRequisitions, vendorOrders, goodsReceipts,
-    invoices, leaseSchedules, assets, auditLog, catalog, notifications, dashboardStats,
+    invoices, vendorPayments, leaseSchedules, assets, auditLog, catalog, notifications, dashboardStats,
     auditFor, markNotificationRead, markAllNotificationsRead,
     intakePO, approvePO, rejectPO, logAudit,
     availableWarehouseStock, onOrderQuantity, fulfillFromWarehouse,
     createPurchaseRequisition, submitPrForApproval, emailPrForApproval, approvePr, rejectPr, markPrConverted,
     createVendorOrder, submitVendorOrder, advanceVendorOrderStatus, addShipmentEvent,
-    createGoodsReceipt, submitInvoice, approveInvoicePayment, markInvoicePaid, createLeaseSchedule,
+    createGoodsReceipt, submitInvoice, approveInvoicePayment, markInvoicePaid, payInvoices, generateRecurringVendorInvoice, sendApDunningReminder, createLeaseSchedule,
     assignAsset, retireAsset, upsertCatalogItem,
 
     // DaaS Receivables
     customerSubscriptions, receivableInvoices, receipts,
-    createCustomerSubscription, generateReceivableInvoice, recordReceipt,
+    createCustomerSubscription, generateReceivableInvoice, generateDueReceivableInvoices, recordReceipt, sendDunningReminder,
 
     // Account Management
     users, vendorAccounts, customerAccounts,

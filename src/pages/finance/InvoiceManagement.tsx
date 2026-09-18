@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useData } from '../../store/DataContext';
 import StatusBadge from '../../components/ui/StatusBadge';
 import type { VendorName } from '../../types/models';
@@ -132,6 +133,15 @@ export default function InvoiceAndLeaseManagement() {
 
   const calculatorRef = useRef<HTMLDivElement>(null);
 
+  // Deep-link support: AP and the GRN screen link here with ?highlight=<invoiceId>
+  // so the GRN → Invoice & Lease → Accounts Payable relationship stays traceable.
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const highlightRowRef = useRef<HTMLTableRowElement>(null);
+  useEffect(() => {
+    if (highlightId) highlightRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId]);
+
   // GRN selection updates
   function onGrnChange(id: string) {
     setGrnId(id);
@@ -217,13 +227,7 @@ export default function InvoiceAndLeaseManagement() {
             <p className="text-sm text-slate-500">
               OEM invoice submission, 3-way match validation, and integrated lease schedule creation.
             </p>
-          </div>
-          <button
-            className="a360-btn-primary"
-            onClick={() => setShowInvoiceForm(s => !s)}
-          >
-            {showInvoiceForm ? 'Close' : '+ Submit Vendor Invoice'}
-          </button>
+          </div> 
         </div>
 
         {showInvoiceForm && (
@@ -288,6 +292,7 @@ export default function InvoiceAndLeaseManagement() {
                 <th className="a360-th">Invoice</th>
                 <th className="a360-th">Vendor</th>
                 <th className="a360-th">PO</th>
+                <th className="a360-th">GRN</th>
                 <th className="a360-th">Amount</th>
                 <th className="a360-th">3-Way Match</th>
                 <th className="a360-th">Status</th>
@@ -299,13 +304,19 @@ export default function InvoiceAndLeaseManagement() {
               {invoices.map(inv => (
                 <tr
                   key={inv.id}
+                  ref={inv.id === highlightId ? highlightRowRef : undefined}
                   className={`hover:bg-slate-50 border-b border-slate-100 transition-colors ${
-                    leaseInvoiceId === inv.id ? 'bg-indigo-50/40' : ''
+                    inv.id === highlightId ? 'bg-amber-50 ring-1 ring-inset ring-amber-300' : leaseInvoiceId === inv.id ? 'bg-indigo-50/40' : ''
                   }`}
                 >
                   <td className="font-medium a360-td text-brand-700">{inv.id}</td>
                   <td className="a360-td">{inv.vendor}</td>
                   <td className="a360-td">{inv.poId}</td>
+                  <td className="a360-td">
+                    {inv.grnId
+                      ? <Link to={`/finance/grn?highlight=${inv.grnId}`} className="text-slate-600 hover:text-brand-700 hover:underline">{inv.grnId}</Link>
+                      : <span className="text-slate-400">—</span>}
+                  </td>
                   <td className="a360-td">${inv.amount.toLocaleString()}</td>
                   <td className="text-xs a360-td">
                     <span className={inv.matchResult?.poMatch ? 'text-emerald-600 font-medium' : 'text-rose-500'}>PO</span> ·{' '}
@@ -336,7 +347,7 @@ export default function InvoiceAndLeaseManagement() {
               ))}
               {!invoices.length && (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center a360-td text-slate-400">
+                  <td colSpan={9} className="py-8 text-center a360-td text-slate-400">
                     No invoices submitted yet.
                   </td>
                 </tr>
@@ -359,7 +370,6 @@ export default function InvoiceAndLeaseManagement() {
               </div>
               <h2 className="mt-1 text-lg font-bold text-slate-900">Operating Lease Calculator</h2>
               <p className="text-sm text-slate-500">
-                LRF amortization engine — models the monthly payment for asset cost, rate, term, and residual value.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -477,9 +487,7 @@ export default function InvoiceAndLeaseManagement() {
                 </div>
               </div>
 
-              <div className="p-3 mt-6 text-xs text-blue-700 border border-blue-100 rounded bg-blue-50/70">
-                Calculated using monthly compounding amortization factoring the final balloon/residual recovery.
-              </div>
+         
             </div>
           </div>
 

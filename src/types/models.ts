@@ -47,15 +47,38 @@ export interface GoodsReceipt {
   condition: 'Good' | 'Damaged' | 'Partial'; notes?: string;
 }
 export type InvoiceStatus = 'SUBMITTED' | 'MATCHED' | 'EXCEPTION' | 'APPROVED_FOR_PAYMENT' | 'PAID';
+export type PaymentMethod = 'ACH' | 'WIRE' | 'CARD' | 'CHECK';
 export interface VendorInvoice {
   id: string; vendor: VendorName; vendorOrderId: string; grnId?: string; poId: string;
   amount: number; currency: 'USD'; invoiceDate: string; dueDate: string; status: InvoiceStatus;
   leaseScheduleId?: string;
   matchResult?: { poMatch: boolean; podMatch: boolean; grnMatch: boolean; variance?: string; };
+  // Populated once the invoice is actually paid, mirroring how Accounts
+  // Receivable records a Receipt against a customer invoice.
+  paymentId?: string; paymentMethod?: PaymentMethod; paymentReference?: string; paidAt?: string;
+  // Dunning: how many payment reminders have gone out on this payable and when
+  // the last one was sent (mirrors ReceivableInvoice's dunning fields).
+  reminderCount?: number; lastReminderAt?: string;
+  // Recurring billing: set when this invoice was auto-generated (or is the
+  // seed of) a recurring lease billing cycle. period/totalPeriods let the UI
+  // show "Period 3 of 24" etc.
+  recurring?: boolean; period?: number; totalPeriods?: number;
+}
+// A single payment run against one or more vendor invoices — supports paying
+// several APPROVED_FOR_PAYMENT invoices together in one batch/reference.
+export interface VendorPayment {
+  id: string; invoiceIds: string[]; vendor: VendorName | 'MULTIPLE'; totalAmount: number;
+  method: PaymentMethod; reference: string; paidAt: string;
 }
 export interface LeaseSchedule {
   id: string; vendor: VendorName; invoiceId: string; termMonths: number; monthlyPayment: number;
   startDate: string; endDate: string; status: 'ACTIVE' | 'PENDING' | 'CLOSED';
+  // Automated recurring AP billing: the next period to invoice for this
+  // lease. The seed invoice (invoiceId above) counts as period 1, so this
+  // starts at 2. Once an invoice against a period is paid, the next one is
+  // generated automatically. Stays undefined/absent for leases created
+  // before this feature existed (recurring generation simply won't fire).
+  nextInvoicePeriod?: number;
 }
 export type LifecycleStatus = 'IN_PROCUREMENT' | 'IN_TRANSIT' | 'IN_STOCK' | 'DEPLOYED' | 'IN_REPAIR' | 'RETIRED';
 export interface AssetRecord {
@@ -137,6 +160,8 @@ export interface ReceivableInvoice {
   id: string; subscriptionId: string; customerName: string; period: number;
   amount: number; issueDate: string; dueDate: string; status: ReceivableInvoiceStatus;
   receiptId?: string;
+  // Dunning: how many reminders have gone out and when the last one was sent.
+  reminderCount?: number; lastReminderAt?: string;
 }
 export interface Receipt {
   id: string; invoiceId: string; subscriptionId: string; amount: number;

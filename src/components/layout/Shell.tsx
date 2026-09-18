@@ -20,12 +20,16 @@ const navGroups: NavGroup[] = [
     { label: 'Goods Receipt / POD', icon: '📦', link: '/warehouse/receipt' },
     { label: 'Device Allocation', icon: '📋', link: '/warehouse/allocation' },
   ]},
-  { title: 'Finance', items: [
-    { label: 'GRNs', icon: '🧾', link: '/finance/grn' },
+  { title: 'Accounts Payable', items: [
     { label: 'Invoices & Lease', icon: '💰', link: '/finance/invoices' },
     { label: 'Accounts Payable', icon: '🏦', link: '/finance/ap' },
-    { label: 'Accounts Receivable', icon: '💵', link: '/receivables' },
+   
+
+  ]}, 
+
+  { title: 'Accounts Receivable', items: [ 
       { label: 'Customer Subscriptions', icon: '📱', link: '/receivables/subscriptions' },
+     { label: 'Accounts Receivable', icon: '💵', link: '/receivables' },
   ]},
 
   { title: 'Asset Management', items: [
