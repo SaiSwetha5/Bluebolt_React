@@ -101,6 +101,89 @@ export function calculateOperatingLease(input: LeaseCalculationInput): LeaseCalc
   };
 }
 
+// Client-side HTML/PDF generator
+function downloadInvoicePdf(inv: any) {
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('Please allow popups to download the invoice PDF.');
+    return;
+  }
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Invoice - ${inv.id}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #1e293b; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; }
+          .title { font-size: 24px; font-weight: bold; color: #0f172a; margin: 0; }
+          .subtitle { font-size: 12px; color: #64748b; margin-top: 4px; }
+          .badge { display: inline-block; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: bold; background: #e0f2fe; color: #0369a1; }
+          .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-bottom: 30px; font-size: 13px; }
+          .box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+          .box h4 { margin: 0 0 10px 0; font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.05em; }
+          .row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+          .row span:first-child { color: #64748b; }
+          .row span:last-child { font-weight: 600; color: #0f172a; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+          th { text-align: left; padding: 10px; background: #f1f5f9; border-bottom: 1px solid #cbd5e1; font-size: 11px; text-transform: uppercase; color: #475569; }
+          td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; }
+          .total { text-align: right; margin-top: 24px; font-size: 16px; font-weight: bold; color: #0f172a; }
+          @media print { body { padding: 20px; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="title">INVOICE DOCUMENT</h1>
+            <div class="subtitle">Cognizant Asset360 · Client Device Lifecycle Management</div>
+          </div>
+          <div><span class="badge">${inv.status || 'MATCHED'}</span></div>
+        </div>
+        <div class="grid">
+          <div class="box">
+            <h4>Invoice &amp; Vendor Information</h4>
+            <div class="row"><span>Invoice ID:</span> <span>${inv.id}</span></div>
+            <div class="row"><span>Vendor:</span> <span>${inv.vendor}</span></div>
+            <div class="row"><span>Date:</span> <span>${inv.invoiceDate || new Date().toISOString().slice(0, 10)}</span></div>
+            <div class="row"><span>Due Date:</span> <span>${inv.dueDate || '30 Days Net'}</span></div>
+          </div>
+          <div class="box">
+            <h4>Procurement Match References</h4>
+            <div class="row"><span>Purchase Order (PO):</span> <span>${inv.poId || '—'}</span></div>
+            <div class="row"><span>Goods Receipt (GRN):</span> <span>${inv.grnId || '—'}</span></div>
+            <div class="row"><span>Lease Schedule:</span> <span>${inv.leaseScheduleId || 'None assigned'}</span></div>
+            <div class="row"><span>3-Way Match:</span> <span>PO · POD · GRN Validated</span></div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Reference</th>
+              <th style="text-align: right;">Amount (USD)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Invoice Drawdown / Device Hardware Batch</td>
+              <td>${inv.poId || inv.id}</td>
+              <td style="text-align: right;">$${Number(inv.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="total">Total Payable: $${Number(inv.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} USD</div>
+        <script>window.onload = function() { window.print(); };</script>
+      </body>
+    </html>
+  `;
+
+  printWindow.document.open();
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+}
+
 // ==========================================
 // 2. MAIN INTEGRATED COMPONENT
 // ==========================================
@@ -131,16 +214,70 @@ export default function InvoiceAndLeaseManagement() {
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [residualValue, setResidualValue] = useState<number>(0);
 
+  // Payment Approval Popup State
+  const [paymentApprovalInvoiceId, setPaymentApprovalInvoiceId] = useState<string | null>(null);
+  const [approverEmail, setApproverEmail] = useState('a.subramanian@cognizant.com');
+  const [approvalSubject, setApprovalSubject] = useState('');
+  const [approvalBody, setApprovalBody] = useState('');
+
   const calculatorRef = useRef<HTMLDivElement>(null);
 
-  // Deep-link support: AP and the GRN screen link here with ?highlight=<invoiceId>
-  // so the GRN → Invoice & Lease → Accounts Payable relationship stays traceable.
+  // Deep-link support
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight');
   const highlightRowRef = useRef<HTMLTableRowElement>(null);
   useEffect(() => {
     if (highlightId) highlightRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [highlightId]);
+
+  // Open payment approval popup
+  function openPaymentApproval(invoiceId: string) {
+    const inv = invoices.find(i => i.id === invoiceId);
+    if (!inv) return;
+
+    setPaymentApprovalInvoiceId(invoiceId);
+    setApprovalSubject(`[Action Required] Approve Payment for ${invoiceId}`);
+
+    const body = `Dear Approver,
+
+An invoice requires your approval before payment can be processed.
+
+─── Invoice Summary ────────────────────────────────────────
+Invoice ID      : ${inv.id}
+Vendor          : ${inv.vendor}
+PO              : ${inv.poId}
+Invoice Amount  : $${inv.amount.toLocaleString()}
+3-Way Match     : PO · POD · GRN
+Current Status  : ${inv.status}
+
+─── Payment Approval ───────────────────────────────────────
+The invoice has successfully completed the 3-way match validation
+against the Purchase Order, Proof of Delivery, and Goods Receipt.
+
+Please log in to Asset360 and navigate to:
+  Invoices & Lease Schedules → ${inv.id}
+to review and approve the payment.
+
+Upon approval, the invoice status will be updated to
+Approved for Payment.
+
+This email was generated automatically by Asset360.`;
+
+    setApprovalBody(body);
+  }
+
+  // Send payment approval
+  function sendPaymentApproval() {
+    if (!paymentApprovalInvoiceId) return;
+
+    if (!approverEmail.trim()) {
+      alert('Please enter the approver email.');
+      return;
+    }
+
+    approveInvoicePayment(paymentApprovalInvoiceId, approverEmail);
+    setPaymentApprovalInvoiceId(null);
+  }
 
   // GRN selection updates
   function onGrnChange(id: string) {
@@ -180,7 +317,7 @@ export default function InvoiceAndLeaseManagement() {
 
     if (inv) {
       setAssetCost(inv.amount);
-      setResidualValue(round2(inv.amount * 0.15)); // Default estimate: 15% residual value
+      setResidualValue(round2(inv.amount * 0.15));
     }
 
     setTimeout(() => {
@@ -217,6 +354,8 @@ export default function InvoiceAndLeaseManagement() {
     setLeaseInvoiceId(null);
   }
 
+  const currentModalInvoice = invoices.find(i => i.id === paymentApprovalInvoiceId);
+
   return (
     <div className="pb-12 space-y-8">
       {/* SECTION 1: INVOICE MANAGEMENT */}
@@ -227,7 +366,7 @@ export default function InvoiceAndLeaseManagement() {
             <p className="text-sm text-slate-500">
               OEM invoice submission, 3-way match validation, and integrated lease schedule creation.
             </p>
-          </div> 
+          </div>
         </div>
 
         {showInvoiceForm && (
@@ -326,22 +465,39 @@ export default function InvoiceAndLeaseManagement() {
                   <td className="a360-td"><StatusBadge status={inv.status} /></td>
                   <td className="a360-td text-slate-500">{inv.leaseScheduleId || '—'}</td>
                   <td className="text-right a360-td">
-                    {inv.status === 'MATCHED' && (
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* PDF Quick Download Icon Button */}
                       <button
-                        onClick={() => approveInvoicePayment(inv.id, 'Finance - R. Nair')}
-                        className="a360-btn-secondary !py-1 !px-2 text-xs"
+                        type="button"
+                        onClick={() => downloadInvoicePdf(inv)}
+                        title="Download Invoice PDF"
+                        className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition-colors"
                       >
-                        Approve Payment
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
                       </button>
-                    )}
-                    {inv.status === 'APPROVED_FOR_PAYMENT' && !inv.leaseScheduleId && (
-                      <button
-                        onClick={() => openLeaseForInvoice(inv.id, inv.vendor)}
-                        className="a360-btn-secondary !py-1 !px-2.5 text-xs text-brand-700 border-brand-300 hover:bg-brand-50"
-                      >
-                        {leaseInvoiceId === inv.id ? 'Editing Lease...' : 'Add Lease Schedule →'}
-                      </button>
-                    )}
+
+                      {/* Approve Payment Button */}
+                      {inv.status === 'MATCHED' && (
+                        <button
+                          onClick={() => openPaymentApproval(inv.id)}
+                          className="a360-btn-secondary !py-1 !px-2 text-xs hover:border-indigo-500 hover:text-indigo-600"
+                        >
+                          Approve Payment
+                        </button>
+                      )}
+
+                      {/* Schedule Lease Button: Available for unassigned leases */}
+                      {!inv.leaseScheduleId && (
+                        <button
+                          onClick={() => openLeaseForInvoice(inv.id, inv.vendor)}
+                          className="a360-btn-secondary !py-1 !px-2.5 text-xs text-brand-700 border-brand-300 hover:bg-brand-50 whitespace-nowrap"
+                        >
+                          {leaseInvoiceId === inv.id ? 'Editing Lease...' : 'Add Lease Schedule →'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -357,7 +513,7 @@ export default function InvoiceAndLeaseManagement() {
         </div>
       </section>
 
-      {/* SECTION 2: OPERATING LEASE CALCULATOR & SCHEDULING (ONE VIEW) */}
+      {/* SECTION 2: OPERATING LEASE CALCULATOR & SCHEDULING */}
       {leaseInvoiceId && (
         <section ref={calculatorRef} className="pt-4 space-y-6 border-t-2 border-dashed border-slate-200">
           <div className="flex items-center justify-between">
@@ -369,8 +525,6 @@ export default function InvoiceAndLeaseManagement() {
                 <span className="text-xs text-slate-400">Vendor: {leaseVendor}</span>
               </div>
               <h2 className="mt-1 text-lg font-bold text-slate-900">Operating Lease Calculator</h2>
-              <p className="text-sm text-slate-500">
-              </p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -391,7 +545,6 @@ export default function InvoiceAndLeaseManagement() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Lease Details Panel */}
             <div className="p-5 space-y-4 a360-card">
               <h3 className="pb-2 text-sm font-semibold border-b text-slate-800 border-slate-100">
                 Lease Details
@@ -447,7 +600,6 @@ export default function InvoiceAndLeaseManagement() {
               </div>
             </div>
 
-            {/* Lease Summary Panel */}
             <div className="flex flex-col justify-between p-5 a360-card">
               <div>
                 <h3 className="pb-2 text-sm font-semibold border-b text-slate-800 border-slate-100">
@@ -486,12 +638,9 @@ export default function InvoiceAndLeaseManagement() {
                   </div>
                 </div>
               </div>
-
-         
             </div>
           </div>
 
-          {/* Amortization Schedule Table */}
           <div className="overflow-hidden a360-card">
             <div className="p-4 border-b border-slate-100 bg-slate-50">
               <h3 className="text-sm font-semibold text-slate-800">Amortization Schedule</h3>
@@ -526,6 +675,89 @@ export default function InvoiceAndLeaseManagement() {
             </div>
           </div>
         </section>
+      )}
+
+      {/* PAYMENT APPROVAL POPUP */}
+      {paymentApprovalInvoiceId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-2xl">
+            <div className="p-5 border-b border-slate-200">
+              <p className="mb-2 text-xs font-bold tracking-wider uppercase text-slate-400">
+                Payment Approval Workflow
+              </p>
+              <h2 className="text-xl font-bold text-slate-900">
+                Send {paymentApprovalInvoiceId} for payment approval
+              </h2>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                The payment approval request is emailed to the nominated approver. A notification copy is automatically routed to the procurement mailbox and recorded in the audit trail.
+              </p>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="a360-label">TO (APPROVER)</label>
+                <input
+                  type="email"
+                  className="a360-input"
+                  value={approverEmail}
+                  onChange={e => setApproverEmail(e.target.value)}
+                  placeholder="Enter approver email"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="a360-label">SUBJECT</label>
+                <input
+                  type="text"
+                  className="a360-input bg-slate-50 text-slate-600"
+                  value={approvalSubject}
+                  readOnly
+                />
+              </div>
+
+              <div>
+                <label className="a360-label">BODY</label>
+                <textarea
+                  className="a360-input h-56 font-mono text-[11px] leading-5 resize-none overflow-y-auto"
+                  value={approvalBody}
+                  onChange={e => setApprovalBody(e.target.value)}
+                  readOnly
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                onClick={() => currentModalInvoice && downloadInvoicePdf(currentModalInvoice)}
+              >
+                <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Download Invoice PDF</span>
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="a360-btn-secondary"
+                  onClick={() => setPaymentApprovalInvoiceId(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="a360-btn-primary"
+                  onClick={sendPaymentApproval}
+                >
+                  Send for approval
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
