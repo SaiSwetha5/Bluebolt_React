@@ -30,8 +30,7 @@ const navGroups: NavGroup[] = [
   { title: 'Accounts Receivable', items: [ 
       { label: 'Customer Subscriptions', icon: '📱', link: '/receivables/subscriptions' },
      { label: 'Accounts Receivable', icon: '💵', link: '/receivables' },
-     { label: 'P&L / Reconciliation', icon: '📊', link: '/finance/profit-and-loss' },
-     { label: 'Invoice Profit/Loss', icon: '🧾', link: '/finance/invoice-profit-loss' },
+     { label: 'P&L / Reconciliation', icon: '📊', link: '/finance/profit-and-loss' }, 
   ]},
 
   { title: 'Asset Management', items: [

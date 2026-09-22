@@ -10,6 +10,7 @@ import { PROCUREMENT_MAILBOX } from '../types/models';
 import type {
   CustomerSubscription, ReceivableInvoice, Receipt,
   AppUser, SystemRole, VendorAccount, CustomerAccount, SsoProvider,
+  CustomerCollection,
 } from '../types/models';
 import { calculateOperatingLease, addMonthsIso } from '../utils/leaseCalculator';
 
@@ -94,6 +95,13 @@ export interface DataContextValue {
   // Dunning: log a reminder against an overdue receivable invoice.
   sendDunningReminder: (invoiceId: string) => ReceivableInvoice | null;
 
+  // --- Invoice Cash Ledger (invoice-level vendor-pay vs customer-collect P&L) ---
+  // Manual customer collections recorded directly against a vendor (AP)
+  // invoice, independent of whether that invoice is part of a DaaS
+  // subscription deal. Powers the standalone Invoice Cash Ledger screen.
+  customerCollections: CustomerCollection[];
+  recordCustomerCollection: (input: { vendorInvoiceId: string; amount: number; method: PaymentMethod; reference: string; payerName?: string; notes?: string }) => CustomerCollection;
+
   // --- Account Management ---
   users: AppUser[];
   vendorAccounts: VendorAccount[];
@@ -130,10 +138,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<PrNotification[]>([]);
 
   // --- Continuation modules: DaaS Receivables & Account Management state ---
-  const counters2 = useRef({ sub: 1, rinv: 1, rcpt: 1, usr: 1, vac: 1, cac: 1 });
+  const counters2 = useRef({ sub: 1, rinv: 1, rcpt: 1, usr: 1, vac: 1, cac: 1, ccol: 1 });
   const [customerSubscriptions, setSubs] = useState<CustomerSubscription[]>([]);
   const [receivableInvoices, setRInvoices] = useState<ReceivableInvoice[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [customerCollections, setCustomerCollections] = useState<CustomerCollection[]>([]);
+  const customerCollectionsRef = useRef<CustomerCollection[]>([]);
+  const setCustomerCollections2 = (fn: (l: CustomerCollection[]) => CustomerCollection[]) => { const n = fn(customerCollectionsRef.current); customerCollectionsRef.current = n; setCustomerCollections(n); };
   const [users, setUsers] = useState<AppUser[]>([]);
   const [vendorAccounts, setVendorAccounts] = useState<VendorAccount[]>([]);
   const [customerAccounts, setCustomerAccounts] = useState<CustomerAccount[]>([]);
@@ -359,6 +370,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const inv: ReceivableInvoice = {
       id: 'RINV-' + pad(counters2.current.rinv++), subscriptionId: sub.id, customerName: sub.customerName,
       period, amount: sub.monthlyPayment, issueDate, dueDate: due.toISOString().slice(0, 10), status: 'SENT',
+      vendorInvoiceId: vendorInvoice.id,
     };
     setRInvoices2(l => [inv, ...l]);
     setSubs2(l => l.map(s => s.id === sub.id ? { ...s, nextInvoicePeriod: s.nextInvoicePeriod + 1 } : s));
@@ -518,9 +530,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const period = sub.nextInvoicePeriod;
     const issueDate = new Date().toISOString().slice(0, 10);
     const due = new Date(issueDate); due.setDate(due.getDate() + 15);
+    // Same asset -> vendor invoice resolution used elsewhere (P&L screens,
+    // auto-sync) so a manually-generated receivable is just as traceable
+    // back to its funding vendor invoice as an auto-generated one.
+    const fundingAsset = assetsRef.current.find(a => a.assetId === sub.assetId);
+    const fundingVendorInvoice = fundingAsset
+      ? invoicesRef.current.find(i =>
+          (fundingAsset.grnId && i.grnId === fundingAsset.grnId) ||
+          i.poId === fundingAsset.poId)
+      : undefined;
     const inv: ReceivableInvoice = {
       id: 'RINV-' + pad(counters2.current.rinv++, 5), subscriptionId: sub.id, customerName: sub.customerName,
       period, amount: sub.monthlyPayment, issueDate, dueDate: due.toISOString().slice(0, 10), status: 'SENT',
+      vendorInvoiceId: fundingVendorInvoice?.id,
     };
     setRInvoices2(l => [inv, ...l]);
     setSubs2(l => l.map(s => s.id === sub.id ? { ...s, nextInvoicePeriod: s.nextInvoicePeriod + 1 } : s));
@@ -576,6 +598,24 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }));
     logEvent('DUNNING_REMINDER_SENT', 'ReceivableInvoice', invoiceId, `Reminder #${(inv.reminderCount ?? 0) + 1} sent to ${inv.customerName} for ${invoiceId} ($${inv.amount.toLocaleString()}).`);
     return updated ?? null;
+  }, [logAudit]);
+
+  // Invoice Cash Ledger: record cash collected from a customer directly
+  // against a vendor (AP) invoice. Unlike recordReceipt (which pays off a
+  // specific subscription's RINV), this works for ANY vendor invoice —
+  // including ones with no DaaS subscription behind them at all — so
+  // finance can track "what we paid this vendor vs what we've collected
+  // from the customer for it" on a per-invoice basis.
+  const recordCustomerCollection = useCallback((input: { vendorInvoiceId: string; amount: number; method: PaymentMethod; reference: string; payerName?: string; notes?: string }): CustomerCollection => {
+    const collection: CustomerCollection = {
+      id: 'CCOL-' + pad(counters2.current.ccol++, 5),
+      vendorInvoiceId: input.vendorInvoiceId, amount: input.amount, receivedAt: new Date().toISOString(),
+      method: input.method, reference: input.reference, payerName: input.payerName, notes: input.notes,
+    };
+    setCustomerCollections2(l => [collection, ...l]);
+    logEvent('RECEIPT_RECORDED', 'Invoice', input.vendorInvoiceId,
+      `Customer payment of $${input.amount.toLocaleString()} recorded against vendor invoice ${input.vendorInvoiceId} via ${input.method} (ref ${input.reference}).`);
+    return collection;
   }, [logAudit]);
 
   // --- Account Management: Users, Roles, Vendor & Customer Accounts ---
@@ -678,7 +718,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     assetsRef.current = stock; setAssets(stock);
 
     // Scenario 1
-    const po1 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88213', source:'API', catalogItemId:'CAT-CONV', quantity:100, unitCost:1540, notes:'Refresh cycle FY26 - branch staff laptops.' });
+    const po1 = intakePOSeed({ clientName:'Dell Financial services', poNumber:'MFG-PO-88213', source:'API', catalogItemId:'CAT-CONV', quantity:100, unitCost:1540, notes:'Refresh cycle FY26 - branch staff laptops.' });
     approvePOSeed(po1.id, 'A. Subramanian (Cognizant)');
     const vo1 = createVOSeed({ poId:po1.id, requestId:po1.requestId!, vendor:'HP', vendorSku:'C2ZK6EC', channel:'Webshop Portal', quantity:100, unitCost:1540, destination:'Cognizant Warehouse', catalogItemId:po1.catalogItemId });
     vosRef.current = vosRef.current.map(v => v.id === vo1.id ? { ...v, status:'SUBMITTED', submittedAt:new Date().toISOString() } : v); setVOs([...vosRef.current]);
@@ -696,11 +736,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setAssets([...assetsRef.current]);
 
     // Scenario 2
-    intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88250', source:'PDF_IMPORT', fileName:'MFG_PO_88250.pdf', catalogItemId:'CAT-14STD', quantity:40, unitCost:1585, notes:'New hire cohort - Q4.' });
+    intakePOSeed({ clientName:'Dell Financial services', poNumber:'MFG-PO-88250', source:'PDF_IMPORT', fileName:'MFG_PO_88250.pdf', catalogItemId:'CAT-14STD', quantity:40, unitCost:1585, notes:'New hire cohort - Q4.' });
 
     // Scenario 3 — Invoice & Lease example: 3-way match MATCHED and sitting in the AP "Awaiting Approval" queue,
     // ready for a live walkthrough of Approve Payment -> Add Lease Schedule -> Mark Paid.
-    const po3 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88199', source:'API', catalogItemId:'CAT-14STD', quantity:15, unitCost:1585, notes:'Early pilot batch.' });
+    const po3 = intakePOSeed({ clientName:'Dell Financial services', poNumber:'MFG-PO-88199', source:'API', catalogItemId:'CAT-14STD', quantity:15, unitCost:1585, notes:'Early pilot batch.' });
     approvePOSeed(po3.id, 'A. Subramanian (Cognizant)');
     const vo3 = createVOSeed({ poId:po3.id, requestId:po3.requestId!, vendor:'HP', vendorSku:'C40DKEC', channel:'Webshop Portal', quantity:15, unitCost:1420, destination:'Cognizant Warehouse', catalogItemId:po3.catalogItemId });
     vosRef.current = vosRef.current.map(v => v.id === vo3.id ? { ...v, status:'SUBMITTED', submittedAt:new Date().toISOString() } : v); setVOs([...vosRef.current]);
@@ -711,16 +751,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const grn3 = createGRNSeed({ vendorOrderId:vo3.id, poId:po3.id, quantityReceived:15, quantityExpected:15, receivedBy:'Warehouse Ops - S. Iyer', podFileName:'POD_HP_' + vo3.id + '.pdf', condition:'Good' });
     const inv2: VendorInvoice = { id:'INV-HP-' + pad(counters.current.inv++, 5), vendor:'HP', vendorOrderId:vo3.id, grnId:grn3.id, poId:po3.id, amount:15 * 1420, currency:'USD', invoiceDate:'2026-09-10', dueDate:'2026-10-10', status:'MATCHED', matchResult:{ poMatch:true, podMatch:true, grnMatch:true } };
     invoicesRef.current = [inv2, ...invoicesRef.current]; setInvoices([...invoicesRef.current]);
+    // Demo for the Invoice Cash Ledger: this invoice has no subscription/lease
+    // behind it, so it never shows up on the deal-based P&L screens — it's the
+    // exact "generic vendor invoice with a partial customer collection" case
+    // the new screen is for. $1,000 collected against a $21,300 invoice.
+    const seedCollection1: CustomerCollection = { id:'CCOL-00001', vendorInvoiceId:inv2.id, amount:1000, receivedAt:'2026-09-18T00:00:00.000Z', method:'ACH', reference:'ACH-REF-90112', payerName:'Dell Financial services' };
+    customerCollectionsRef.current = [seedCollection1]; setCustomerCollections([seedCollection1]);
+    counters2.current.ccol = 2;
 
     // Scenario 4
-    const po4 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88301', source:'API', catalogItemId:'CAT-CONV', quantity:50, unitCost:1540, notes:'Q3 expansion.' });
+    const po4 = intakePOSeed({ clientName:'Dell Financial services', poNumber:'MFG-PO-88301', source:'API', catalogItemId:'CAT-CONV', quantity:50, unitCost:1540, notes:'Q3 expansion.' });
     approvePOSeed(po4.id, 'A. Subramanian (Cognizant)');
     const inStockQty4 = assetsRef.current.filter(a => a.catalogItemId === 'CAT-CONV' && a.lifecycleStatus === 'IN_STOCK' && a.location === 'Cognizant Warehouse').length;
     const pr4: PurchaseRequisition = { id:'PR-2026-' + pad(counters.current.pr++), poId:po4.id, requestId:po4.requestId!, catalogItemId:'CAT-CONV', requestedQty:50, inStockQty:inStockQty4, onOrderQty:0, balanceQty:Math.max(50-inStockQty4,0), preferredVendor:'HP', estimatedUnitCost:1540, estimatedTotalCost:Math.max(50-inStockQty4,0)*1540, costCenter:'CC-APAC-IT-01', justification:'Q3 laptop refresh for Chennai branch expansion.', requestedBy:'S. Krishnamurthy', requestedAt:new Date().toISOString(), status:'APPROVED', approvedBy:'A. Subramanian (Cognizant)', approvedAt:new Date().toISOString(), emailedTo:'a.subramanian@cognizant.com', emailedAt:new Date().toISOString(), approvalNotificationSentTo:PROCUREMENT_MAILBOX, approvalNotificationSentAt:new Date().toISOString(), procurementNotificationSentTo:PROCUREMENT_MAILBOX, procurementNotificationSentAt:new Date().toISOString() };
     prsRef.current = [pr4, ...prsRef.current]; setPRs([...prsRef.current]);
 
     // Scenario 5
-    const po5 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88310', source:'API', catalogItemId:'CAT-14STD', quantity:25, unitCost:1585, notes:'Finance team laptop upgrade.' });
+    const po5 = intakePOSeed({ clientName:'Dell Financial services', poNumber:'MFG-PO-88310', source:'API', catalogItemId:'CAT-14STD', quantity:25, unitCost:1585, notes:'Finance team laptop upgrade.' });
     approvePOSeed(po5.id, 'A. Subramanian (Cognizant)');
     const inStockQty5 = assetsRef.current.filter(a => a.catalogItemId === 'CAT-14STD' && a.lifecycleStatus === 'IN_STOCK' && a.location === 'Cognizant Warehouse').length;
     const pr5: PurchaseRequisition = { id:'PR-2026-' + pad(counters.current.pr++), poId:po5.id, requestId:po5.requestId!, catalogItemId:'CAT-14STD', requestedQty:25, inStockQty:inStockQty5, onOrderQty:0, balanceQty:Math.max(25-inStockQty5,0), preferredVendor:'Dell', estimatedUnitCost:1585, estimatedTotalCost:Math.max(25-inStockQty5,0)*1585, costCenter:'CC-FIN-02', justification:'Finance team annual device refresh.', requestedBy:'R. Nair', requestedAt:new Date().toISOString(), status:'PENDING_APPROVAL', emailedTo:'a.subramanian@cognizant.com', emailedAt:new Date().toISOString(), approvalNotificationSentTo:PROCUREMENT_MAILBOX, approvalNotificationSentAt:new Date().toISOString() };
@@ -728,7 +775,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     // Scenario 6 — live GRN screen example: a Dell shipment that has reached the warehouse but has not
     // been received yet, so "Delivered Orders Awaiting Intake" on the Goods Receipt screen is never empty.
-    const po6 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88362', source:'API', catalogItemId:'CAT-CONV', quantity:30, unitCost:1899, notes:'Executive convertible refresh - APAC leadership team.' });
+    const po6 = intakePOSeed({ clientName:'Dell Financial services', poNumber:'MFG-PO-88362', source:'API', catalogItemId:'CAT-CONV', quantity:30, unitCost:1899, notes:'Executive convertible refresh - APAC leadership team.' });
     approvePOSeed(po6.id, 'A. Subramanian (Cognizant)');
     const vo6 = createVOSeed({ poId:po6.id, requestId:po6.requestId!, vendor:'Dell', vendorSku:'LAT7440-U5-14', channel:'Integrated Procurement API', quantity:30, unitCost:1510, destination:'Cognizant Warehouse', catalogItemId:po6.catalogItemId });
     vosRef.current = vosRef.current.map(v => v.id === vo6.id ? { ...v, status:'SUBMITTED', submittedAt:new Date().toISOString() } : v); setVOs([...vosRef.current]);
@@ -741,7 +788,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     // Scenario 7 — Accounts Payable exception example: GRN captured without proof of delivery, so the
     // 3-way match fails and the invoice lands in AP as an EXCEPTION requiring follow-up.
-    const po7 = intakePOSeed({ clientName:'Meridian Financial Group', poNumber:'MFG-PO-88410', source:'API', catalogItemId:'CAT-CONV', quantity:12, unitCost:1899, notes:'Regional sales team refresh.' });
+    const po7 = intakePOSeed({ clientName:'Dell Financial services', poNumber:'MFG-PO-88410', source:'API', catalogItemId:'CAT-CONV', quantity:12, unitCost:1899, notes:'Regional sales team refresh.' });
     approvePOSeed(po7.id, 'A. Subramanian (Cognizant)');
     const vo7 = createVOSeed({ poId:po7.id, requestId:po7.requestId!, vendor:'Lenovo', vendorSku:'X13G5-U5-14', channel:'EDI', quantity:12, unitCost:1495, destination:'Cognizant Warehouse', catalogItemId:po7.catalogItemId });
     vosRef.current = vosRef.current.map(v => v.id === vo7.id ? { ...v, status:'SUBMITTED', submittedAt:new Date().toISOString() } : v); setVOs([...vosRef.current]);
@@ -774,7 +821,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setVendorAccounts(seedVendorAccounts);
 
     const seedCustomerAccounts: CustomerAccount[] = [
-      { id:'CAC-001', name:'Meridian Financial Group', region:'APAC', billingContact:'M. Fernandez', billingEmail:'billing@meridianfg.com', status:'ACTIVE', creditTermDays:30 },
+      { id:'CAC-001', name:'Dell Financial services', region:'APAC', billingContact:'M. Fernandez', billingEmail:'billing@meridianfg.com', status:'ACTIVE', creditTermDays:30 },
     ];
     counters2.current.cac = 2;
     setCustomerAccounts(seedCustomerAccounts);
@@ -787,7 +834,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (deployedAsset) {
       const subCalc = calculateOperatingLease({ assetCost: 1540, annualInterestRatePct: 7, termYears: 3, startDate: '2026-06-01', residualValue: 200 });
       const seedSub: CustomerSubscription = {
-        id:'LEASE-2026-0001', customerAccountId:'CAC-001', customerName:'Meridian Financial Group',
+        id:'LEASE-2026-0001', customerAccountId:'CAC-001', customerName:'Dell Financial services',
         assetId: deployedAsset.assetId, catalogItemId: deployedAsset.catalogItemId, serviceClass:'DaaS Standard',
         assetCost:1540, annualInterestRatePct:7, termMonths:subCalc.numberOfPayments, residualValue:200,
         monthlyPayment:subCalc.monthlyPayment, startDate:'2026-06-01',
@@ -797,9 +844,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       subsRef.current = [seedSub]; setSubs([seedSub]);
       counters2.current.sub = 2;
 
-      const seedInv: ReceivableInvoice = { id:'RINV-00001', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:1, amount:seedSub.monthlyPayment, issueDate:'2026-07-01', dueDate:'2026-07-16', status:'PAID', receiptId:'RCPT-00001' };
-      const seedInv2: ReceivableInvoice = { id:'RINV-00002', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:2, amount:seedSub.monthlyPayment, issueDate:'2026-08-01', dueDate:'2026-08-16', status:'SENT' };
-      const seedInv3: ReceivableInvoice = { id:'RINV-00003', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:3, amount:seedSub.monthlyPayment, issueDate:'2026-09-01', dueDate:'2026-09-16', status:'SENT' };
+      const seedInv: ReceivableInvoice = { id:'RINV-00001', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:1, amount:seedSub.monthlyPayment, issueDate:'2026-07-01', dueDate:'2026-07-16', status:'PAID', receiptId:'RCPT-00001', vendorInvoiceId: ls1.invoiceId };
+      const seedInv2: ReceivableInvoice = { id:'RINV-00002', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:2, amount:seedSub.monthlyPayment, issueDate:'2026-08-01', dueDate:'2026-08-16', status:'SENT', vendorInvoiceId: ls1.invoiceId };
+      const seedInv3: ReceivableInvoice = { id:'RINV-00003', subscriptionId:seedSub.id, customerName:seedSub.customerName, period:3, amount:seedSub.monthlyPayment, issueDate:'2026-09-01', dueDate:'2026-09-16', status:'SENT', vendorInvoiceId: ls1.invoiceId };
       rInvoicesRef.current = [seedInv3, seedInv2, seedInv]; setRInvoices(rInvoicesRef.current);
       counters2.current.rinv = 4;
       subsRef.current = subsRef.current.map(s => s.id === seedSub.id ? { ...s, nextInvoicePeriod: 4 } : s); setSubs([...subsRef.current]);
@@ -811,7 +858,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       if (deployedAsset2) {
         const subCalc2 = calculateOperatingLease({ assetCost: 1540, annualInterestRatePct: 6.5, termYears: 3, startDate: '2026-09-01', residualValue: 200 });
         const seedSub2: CustomerSubscription = {
-          id:'LEASE-2026-0002', customerAccountId:'CAC-001', customerName:'Meridian Financial Group',
+          id:'LEASE-2026-0002', customerAccountId:'CAC-001', customerName:'Dell Financial services',
           assetId: deployedAsset2.assetId, catalogItemId: deployedAsset2.catalogItemId, serviceClass:'DaaS Premium',
           assetCost:1540, annualInterestRatePct:6.5, termMonths:subCalc2.numberOfPayments, residualValue:200,
           monthlyPayment:subCalc2.monthlyPayment, startDate:'2026-09-01',
@@ -855,6 +902,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     // DaaS Receivables
     customerSubscriptions, receivableInvoices, receipts,
     createCustomerSubscription, generateReceivableInvoice, generateDueReceivableInvoices, recordReceipt, sendDunningReminder,
+
+    // Invoice Cash Ledger
+    customerCollections, recordCustomerCollection,
 
     // Account Management
     users, vendorAccounts, customerAccounts,

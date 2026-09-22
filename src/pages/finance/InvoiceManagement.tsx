@@ -196,6 +196,7 @@ export default function InvoiceAndLeaseManagement() {
     submitInvoice,
     approveInvoicePayment,
     createLeaseSchedule,
+    receivableInvoices,
   } = useData();
 
   // Submission Form State
@@ -436,6 +437,7 @@ This email was generated automatically by Asset360.`;
                 <th className="a360-th">3-Way Match</th>
                 <th className="a360-th">Status</th>
                 <th className="a360-th">Lease</th>
+                <th className="a360-th">Customer Invoice(s)</th>
                 <th className="text-right a360-th">Action</th>
               </tr>
             </thead>
@@ -464,6 +466,26 @@ This email was generated automatically by Asset360.`;
                   </td>
                   <td className="a360-td"><StatusBadge status={inv.status} /></td>
                   <td className="a360-td text-slate-500">{inv.leaseScheduleId || '—'}</td>
+                  <td className="a360-td">
+                    {(() => {
+                      const mapped = receivableInvoices.filter(r => r.vendorInvoiceId === inv.id);
+                      if (!mapped.length) return <span className="text-slate-400">—</span>;
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          {mapped.map(r => (
+                            <Link
+                              key={r.id}
+                              to={`/receivables/subscriptions/${r.subscriptionId}`}
+                              className="text-brand-600 hover:underline text-xs"
+                              title={`Customer invoice billed against this vendor invoice (period ${r.period})`}
+                            >
+                              {r.id}
+                            </Link>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="text-right a360-td">
                     <div className="flex items-center justify-end gap-1.5">
                       {/* PDF Quick Download Icon Button */}
@@ -503,7 +525,7 @@ This email was generated automatically by Asset360.`;
               ))}
               {!invoices.length && (
                 <tr>
-                  <td colSpan={9} className="py-8 text-center a360-td text-slate-400">
+                  <td colSpan={10} className="py-8 text-center a360-td text-slate-400">
                     No invoices submitted yet.
                   </td>
                 </tr>

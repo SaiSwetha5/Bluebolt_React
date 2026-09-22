@@ -67,6 +67,7 @@ export interface VendorInvoice {
 // A single payment run against one or more vendor invoices — supports paying
 // several APPROVED_FOR_PAYMENT invoices together in one batch/reference.
 export interface VendorPayment {
+export interface VendorPayment {
   id: string; invoiceIds: string[]; vendor: VendorName | 'MULTIPLE'; totalAmount: number;
   method: PaymentMethod; reference: string; paidAt: string;
 }
@@ -162,10 +163,27 @@ export interface ReceivableInvoice {
   receiptId?: string;
   // Dunning: how many reminders have gone out and when the last one was sent.
   reminderCount?: number; lastReminderAt?: string;
+  // Explicit traceability back to the vendor (AP) invoice that funded the
+  // asset being billed here — set whenever this receivable is generated
+  // (manually or automatically) for a subscription whose asset has a known
+  // vendor invoice on file. Lets the UI show "this customer invoice maps to
+  // that vendor invoice" instead of the two just happening to share a
+  // subscription id under the hood.
+  vendorInvoiceId?: string;
 }
 export interface Receipt {
   id: string; invoiceId: string; subscriptionId: string; amount: number;
   receivedAt: string; method: 'ACH' | 'WIRE' | 'CARD' | 'CHECK'; reference: string;
+}
+
+// A manually-recorded payment received from a customer, tied directly to a
+// vendor (AP) invoice rather than to a subscription/lease deal. This is what
+// powers the standalone Invoice Cash Ledger P&L screen: any vendor invoice —
+// whether or not it's part of a DaaS subscription — can have customer cash
+// collected against it and tracked to a balance.
+export interface CustomerCollection {
+  id: string; vendorInvoiceId: string; amount: number; receivedAt: string;
+  method: 'ACH' | 'WIRE' | 'CARD' | 'CHECK'; reference: string; payerName?: string; notes?: string;
 }
 
 // ---- Account Management (users, roles/RBAC, vendor & customer accounts) ----

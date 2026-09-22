@@ -91,15 +91,24 @@ export default function SubscriptionDetail() {
             <div className="px-4 py-3 border-b border-slate-100"><h2 className="text-sm font-semibold text-slate-800">Leases &amp; Receipts</h2></div>
             <table className="w-full">
               <thead><tr>
-                <th className="a360-th">Leases</th><th className="a360-th">Period</th><th className="a360-th">Amount</th>
+                <th className="a360-th">Invoice</th><th className="a360-th">Vendor Invoice</th><th className="a360-th">Period</th><th className="a360-th">Amount</th>
                 <th className="a360-th">Due</th><th className="a360-th">Status</th><th className="a360-th">Receipt</th><th className="a360-th"></th>
               </tr></thead>
               <tbody>
                 {invoicesForSub.map(inv => {
                   const receipt = receipts.find(r => r.id === inv.receiptId);
+                  // Prefer the explicit vendorInvoiceId stamped on the receivable at
+                  // generation time; fall back to the asset's origin invoice for any
+                  // older records created before that field existed.
+                  const mappedVendorInvoiceId = inv.vendorInvoiceId || originInvoice?.id;
                   return (
                     <tr key={inv.id} className="hover:bg-slate-50">
                       <td className="font-medium a360-td text-brand-700">{inv.id}</td>
+                      <td className="a360-td">
+                        {mappedVendorInvoiceId
+                          ? <Link to={`/finance/invoices?highlight=${mappedVendorInvoiceId}`} className="text-brand-600 hover:underline" title="Vendor invoice this customer invoice is billed against">{mappedVendorInvoiceId}</Link>
+                          : <span className="text-slate-400">—</span>}
+                      </td>
                       <td className="a360-td">{inv.period}/{sub.termMonths}</td>
                       <td className="a360-td">${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
                       <td className="a360-td text-slate-500">{inv.dueDate}</td>
@@ -122,7 +131,7 @@ export default function SubscriptionDetail() {
                     </tr>
                   );
                 })}
-                {!invoicesForSub.length && <tr><td colSpan={7} className="py-8 text-center a360-td text-slate-400">No invoices generated yet.</td></tr>}
+                {!invoicesForSub.length && <tr><td colSpan={8} className="py-8 text-center a360-td text-slate-400">No invoices generated yet.</td></tr>}
               </tbody>
             </table>
           </div>

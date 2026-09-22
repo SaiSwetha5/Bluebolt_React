@@ -188,7 +188,7 @@ export default function PoImport() {
   const [source, setSource] = useState<PoSource>('PDF_IMPORT');
 
   // API tab
-  const [clientName, setClientName] = useState('Meridian Financial Group');
+  const [clientName, setClientName] = useState('Dell Financial services');
   const [poNumber, setPoNumber] = useState('');
   const [catalogItemId, setCatalogItemId] = useState('');
   const [quantity, setQuantity] = useState(100);
