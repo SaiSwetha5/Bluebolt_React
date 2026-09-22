@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../../store/DataContext';
 import { CUSTOMER_PO_MOCK } from '../../mocks/Customer_PO_MOCK';
+import { getPOExtractUrl } from '../../config/api.config';
 
 // --- Reusable Atomic Form Field Component ---
 interface FormFieldProps {
@@ -105,18 +106,38 @@ export interface LineItem {
   billingMethod?: string;
 }
 
+interface UploadDebugState {
+  phase: 'idle' | 'starting' | 'requesting' | 'success' | 'error' | 'mock-loaded' | 'cancelled';
+  requestUrl: string;
+  fileName: string;
+  startedAt: string;
+  responseStatus?: number;
+  responseStatusText?: string;
+  errorMessage?: string;
+}
+
 export default function CustomerPoUpload() {
+  console.log('🚀 [COMPONENT] CustomerPoUpload component mounted');
+  
   const navigate = useNavigate();
   const dataContext = useData();
 
   // Extract handlers from context safely
-  const { intakePO, addCustomerPo, updateCustomerPo, catalog = [] } = dataContext || {};
+  const { intakePO, catalog = [] } = dataContext || {};
+  
+  console.log('📊 [CONTEXT] DataContext loaded', { hasCatalog: catalog.length > 0, hasIntakePO: typeof intakePO === 'function' });
 
   // Upload & parse tracking
   const [poFile, setPoFile] = useState<File | null>(null);
   const [, setAdditionalFiles] = useState<FileList | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [isParsed, setIsParsed] = useState(false);
+  const [uploadDebug, setUploadDebug] = useState<UploadDebugState>({
+    phase: 'idle',
+    requestUrl: '',
+    fileName: '',
+    startedAt: '',
+  });
 
   // 1. PO Header & Party metadata
   const [poData, setPoData] = useState<any>({
@@ -156,61 +177,124 @@ export default function CustomerPoUpload() {
   });
 
   // Handle PDF Upload & Trigger Extraction into form
-  const handlePdfUpload = (file: File) => {
+const handlePdfUpload = async (file: File) => {
+    const requestUrl = getPOExtractUrl();
+    const startedAt = new Date().toLocaleTimeString();
+
+    console.log('➤ [ENTRY] handlePdfUpload - Starting PDF upload process', { fileName: file.name, fileSize: file.size });
     setPoFile(file);
     setIsParsing(true);
+    setUploadDebug({
+      phase: 'starting',
+      requestUrl,
+      fileName: file.name,
+      startedAt,
+    });
 
-    setTimeout(() => {
-      const mock = CUSTOMER_PO_MOCK.data;
+    try {
+      // 1. DELETE OR COMMENT OUT THIS SINGLE LINE TO USE THE REAL API:
+      let extractedData: any = CUSTOMER_PO_MOCK.data;
 
-      setPoData({
-        orderNo: mock.orderNo,
-        contractId: mock.contractId,
-        revision: mock.revision,
-        issuedOn: mock.issuedOn,
-        createdOn: mock.createdOn,
-        createdBy: mock.createdBy,
-        requester: mock.requester,
-        poEndDate: mock.poEndDate,
-        totalAmount: mock.totalAmount,
-        currency: mock.currency,
-        intakeStatus: mock.intakeStatus,
-        customerName: mock.billTo?.company || 'Cognizant Technology Solution France SA (US406)',
-        shipment: 'Air Freight',
-        supplier: mock.supplier,
-        shipTo: mock.shipTo,
-        billTo: mock.billTo,
-        deliverTo: mock.deliverTo,
+      // 2. If the mock line above is commented out, execute the actual API request:
+      if (!extractedData) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        console.log('⏳ [PROCESS] Sending PDF to API endpoint:', requestUrl);
+        setUploadDebug((prev) => ({ ...prev, phase: 'requesting' }));
+
+        const response = await fetch(requestUrl, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        }
+
+        const json = await response.json();
+        // Normalizes whether API returns { data: { ... } } or { ... }
+        extractedData = json.data ?? json;
+      }
+
+      console.log('✓ [SUCCESS] PDF extraction successful', {
+        poNumber: extractedData.orderNo,
+        lineItems: extractedData.lineItems?.length || 0,
       });
 
-      const parsedItems: LineItem[] = (mock.lineItems || []).map((item: any, idx: number) => ({
+      setUploadDebug((prev) => ({
+        ...prev,
+        phase: 'success',
+        errorMessage: undefined,
+      }));
+
+      // Single mapping block for state updates
+      setPoData({
+        orderNo: extractedData.orderNo || '',
+        contractId: extractedData.contractId || '',
+        revision: extractedData.revision || '',
+        issuedOn: extractedData.issuedOn || '',
+        createdOn: extractedData.createdOn || '',
+        createdBy: extractedData.createdBy || '',
+        requester: extractedData.requester || '',
+        poEndDate: extractedData.poEndDate || '',
+        totalAmount: extractedData.totalAmount || 0,
+        currency: extractedData.currency || 'USD',
+        intakeStatus: extractedData.intakeStatus || 'AWAITING_UPLOAD',
+        customerName: extractedData.customerName || extractedData.billTo?.company || 'Customer',
+        shipment: extractedData.shipment || 'Air Freight',
+        supplier: extractedData.supplier || null,
+        shipTo: extractedData.shipTo || null,
+        billTo: extractedData.billTo || null,
+        deliverTo: extractedData.deliverTo || null,
+      });
+
+      const parsedItems: LineItem[] = (extractedData.lineItems || []).map((item: any, idx: number) => ({
         lineNo: item.lineNo || idx + 1,
-        description: item.description,
+        description: item.description || '',
         fullDescription: item.fullDescription,
-        partNumber: item.partNumber,
-        catalogMatch: item.partNumber,
-        entityName: mock.billTo?.name || 'FRPALDEA03 : Ariane - PA FRA, COG',
-        entityCode: mock.deliverTo?.locationCode?.id || 'FRPALDEA03',
+        partNumber: item.partNumber || '',
+        catalogMatch: item.catalogMatch || item.partNumber || '',
+        entityName: extractedData.billTo?.name || item.entityName || '',
+        entityCode: extractedData.deliverTo?.locationCode?.id || item.entityCode || '',
         quantity: item.quantity || 1,
         uom: item.uom || 'each',
         unitPrice: item.unitPrice || 0,
         netAmount: item.netAmount || 0,
         amount: item.amount || 0,
-        billingMethod: 'Monthly',
+        billingMethod: item.billingMethod || 'Monthly',
       }));
 
       setLineItems(parsedItems);
       if (parsedItems.length > 0) {
         setSelectedIdx(0);
       }
-      setIsParsing(false);
       setIsParsed(true);
-    }, 600);
+      console.log('✓ [EXIT] handlePdfUpload - Process completed', { totalLineItems: parsedItems.length });
+    } catch (error) {
+      console.error('❌ [ERROR] handlePdfUpload failed:', error);
+      setUploadDebug((prev) => ({
+        ...prev,
+        phase: 'error',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      }));
+    } finally {
+      setIsParsing(false);
+    }
   };
 
   useEffect(() => {
+    console.log('➤ [LIFECYCLE] useEffect triggered', { selectedIdx, lineItemsCount: lineItems.length });
+    
     if (lineItems.length > 0 && selectedIdx >= 0 && selectedIdx < lineItems.length) {
       const active = lineItems[selectedIdx];
+      console.log('📌 [UPDATE] Setting editForm for selected row', { 
+        rowIndex: selectedIdx, 
+        partNumber: active.partNumber,
+        quantity: active.quantity,
+        unitPrice: active.unitPrice 
+      });
+      
       setEditForm({
         partNumber: active.partNumber,
         catalogMatch: active.catalogMatch || active.partNumber,
@@ -221,6 +305,8 @@ export default function CustomerPoUpload() {
         amount: active.amount,
         billingMethod: active.billingMethod || 'Monthly',
       });
+    } else {
+      console.log('⚠️ [WARNING] useEffect - Invalid state for editForm update', { selectedIdx, lineItemsCount: lineItems.length });
     }
   }, [selectedIdx, lineItems]);
 
@@ -231,7 +317,12 @@ export default function CustomerPoUpload() {
   }, [lineItems]);
 
   const handleEditChange = (field: keyof LineItem, val: any) => {
-    if (selectedIdx < 0 || selectedIdx >= lineItems.length) return;
+    console.log('➤ [ENTRY] handleEditChange', { selectedRow: selectedIdx + 1, field, newValue: val });
+    
+    if (selectedIdx < 0 || selectedIdx >= lineItems.length) {
+      console.warn('⚠️ [WARNING] Invalid selectedIdx:', selectedIdx);
+      return;
+    }
 
     setLineItems((prev) => {
       const updated = [...prev];
@@ -244,6 +335,7 @@ export default function CustomerPoUpload() {
         current.unitPrice = price;
         current.amount = qty * price;
         current.netAmount = qty * price;
+        console.log('🧮 [CALC] Amount recalculated', { qty, price, amount: current.amount });
       }
 
       updated[selectedIdx] = current;
@@ -259,9 +351,13 @@ export default function CustomerPoUpload() {
       }
       return next;
     });
+
+    console.log('✓ [EXIT] handleEditChange - Field updated successfully');
   };
 
   const handleAddNewItem = () => {
+    console.log('➤ [ENTRY] handleAddNewItem - Adding new line item');
+    
     const newItem: LineItem = {
       lineNo: lineItems.length + 1,
       description: 'Peripheral / Equipment Bundle',
@@ -278,24 +374,37 @@ export default function CustomerPoUpload() {
     const updated = [...lineItems, newItem];
     setLineItems(updated);
     setSelectedIdx(updated.length - 1);
+    
+    console.log('✓ [EXIT] handleAddNewItem - New line item added', { totalItems: updated.length, newLineNo: newItem.lineNo });
   };
 
   const handleDeleteRow = (e: React.MouseEvent, indexToDelete: number) => {
+    console.log('➤ [ENTRY] handleDeleteRow', { rowIndex: indexToDelete, partNumber: lineItems[indexToDelete]?.partNumber });
+    
     e.stopPropagation();
     if (lineItems.length === 1) {
+      console.warn('⚠️ [WARNING] Cannot delete - only one line item remaining');
       alert('A purchase order requires at least one line item.');
       return;
     }
+    
+    const deletedItem = lineItems[indexToDelete];
     const updated = lineItems.filter((_, idx) => idx !== indexToDelete);
     setLineItems(updated);
     if (selectedIdx >= updated.length) {
       setSelectedIdx(updated.length - 1);
     }
+    
+    console.log('✓ [EXIT] handleDeleteRow - Line item deleted', { deletedPartNumber: deletedItem?.partNumber, remainingItems: updated.length });
   };
 
   // --- SAVE PURCHASE ORDER: Formatted to match PoList columns ---
   const handleSavePo = () => {
+    console.log('➤ [ENTRY] handleSavePo - Starting PO save process');
+    console.log('📋 [DATA] Current form state', { isParsed, lineItemsCount: lineItems.length, totalAmount: grandTotal });
+    
     if (!isParsed && lineItems.length === 0) {
+      console.warn('⚠️ [VALIDATION] No PO data to save');
       alert('Please upload a PO PDF or configure line items before saving.');
       return;
     }
@@ -303,6 +412,8 @@ export default function CustomerPoUpload() {
     const firstItem = lineItems[0] || {};
     const averageUnitCost = totalUnits > 0 ? Math.round((grandTotal / totalUnits) * 100) / 100 : 0;
     const generatedId = `CPO-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    console.log('🏢 [MAPPING] Location details', { city: poData.deliverTo?.locationCode?.city, state: poData.deliverTo?.locationCode?.state });
 
     const city = poData.deliverTo?.locationCode?.city || poData.billTo?.city || poData.shipTo?.city || 'La Defense';
     const state = poData.deliverTo?.locationCode?.state || poData.billTo?.state || 'PA';
@@ -315,6 +426,8 @@ export default function CustomerPoUpload() {
           (r.partNumber && c.currentGenSku?.toLowerCase() === r.partNumber.toLowerCase())
       )
     );
+
+    console.log('🔍 [CATALOG] Catalog matching result', { found: !!matchedCatalogItem, catalogItemId: matchedCatalogItem?.id });
 
     // Complete schema adhering to PoList and DataContext models
     const unifiedPoRecord = {
@@ -339,17 +452,27 @@ export default function CustomerPoUpload() {
       lineItems,
     };
 
+    console.log('📝 [RECORD] Generated PO record', { 
+      id: unifiedPoRecord.id, 
+      poNumber: unifiedPoRecord.poNumber, 
+      clientName: unifiedPoRecord.clientName,
+      totalAmount: unifiedPoRecord.totalAmount,
+      lineItemsCount: unifiedPoRecord.lineItems.length 
+    });
+
     // Call store action
     if (typeof intakePO === 'function') {
+      console.log('💾 [ACTION] Calling intakePO to save PO to data store');
       intakePO(unifiedPoRecord);
-    } else if (typeof addCustomerPo === 'function') {
-      addCustomerPo(unifiedPoRecord);
-    } else if (typeof updateCustomerPo === 'function') {
-      updateCustomerPo(unifiedPoRecord);
+      console.log('✓ [SUCCESS] PO saved to data store successfully');
+    } else {
+      console.error('❌ [ERROR] intakePO function not available');
     }
 
     // Navigate to PO List to immediately view the table update
+    console.log('🔀 [NAVIGATE] Redirecting to PO list page');
     navigate('/po');
+    console.log('✓ [EXIT] handleSavePo - Completed successfully');
   };
 
   return (
@@ -382,6 +505,36 @@ export default function CustomerPoUpload() {
               {poFile ? poFile.name : 'No file chosen'}
             </span>
           </p>
+          {uploadDebug.phase !== 'idle' && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-semibold uppercase tracking-wider text-slate-500">Request Debug</span>
+                <span className="font-semibold text-slate-700">{uploadDebug.phase}</span>
+              </div>
+              <div className="mt-2 space-y-1">
+                <div>
+                  File: <span className="font-medium text-slate-800">{uploadDebug.fileName || 'N/A'}</span>
+                </div>
+                <div>
+                  Started: <span className="font-medium text-slate-800">{uploadDebug.startedAt || 'N/A'}</span>
+                </div>
+                <div className="break-all">
+                  URL: <span className="font-mono text-slate-800">{uploadDebug.requestUrl || 'N/A'}</span>
+                </div>
+                <div>
+                  HTTP Status:{' '}
+                  <span className="font-medium text-slate-800">
+                    {uploadDebug.responseStatus ? `${uploadDebug.responseStatus} ${uploadDebug.responseStatusText || ''}` : 'No response yet'}
+                  </span>
+                </div>
+                {uploadDebug.errorMessage && (
+                  <div className="break-words text-rose-600">
+                    Error: <span className="font-medium">{uploadDebug.errorMessage}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
@@ -390,16 +543,11 @@ export default function CustomerPoUpload() {
           <div className="flex items-center gap-2 mt-3">
         <input
       type="file"
-      disabled
       multiple
       className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-500 cursor-not-allowed"
       onChange={(e) => setAdditionalFiles(e.target.files)}
     />
-    </div>
-       <p className="mt-2 text-xs text-slate-400">
-      Additional file upload is currently disabled.
-    </p>
-         
+          </div>
         </div>
       </div>
 

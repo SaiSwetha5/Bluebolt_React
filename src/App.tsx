@@ -36,6 +36,8 @@ import UsersList from './pages/accounts/UsersList';
 import RolesMatrix from './pages/accounts/RolesMatrix';
 import VendorAccounts from './pages/accounts/VendorAccounts';
 import CustomerAccounts from './pages/accounts/CustomerAccounts';
+import ProfitAndLossOverview from './pages/leasing/ProfitAndLossOverview';
+import InvoiceProfitLoss from './pages/leasing/InvoiceProfitLoss';
 
 export default function App() {
   return (
@@ -69,6 +71,8 @@ export default function App() {
             <Route path="finance/invoices" element={<InvoiceManagement />} />
             <Route path="finance/ap" element={<ApProcessing />} />
             <Route path="finance/ar" element={<ArProcessing />} />
+            <Route path="/finance/profit-and-loss" element={<ProfitAndLossOverview />} />
+            <Route path="/finance/invoice-profit-loss" element={<InvoiceProfitLoss />} />
 
             {/* Inventory */}
             <Route path="inventory" element={<AssetList />} />

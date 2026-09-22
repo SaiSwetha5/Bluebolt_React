@@ -340,6 +340,33 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return grn;
   }, [logAudit]);
 
+  // A vendor (AP) invoice and the customer (AR) invoice that funds it must be
+  // generated together — otherwise RINV and INV_HP rows drift out of sync and
+  // show up unpaired on the Invoice Profit/Loss screen. Given a vendor
+  // invoice, find the DaaS subscription billing the same asset (matched via
+  // PO/GRN, same as the Profit/Loss screen's deal matching) and raise its
+  // next-period receivable invoice in the same step.
+  function syncReceivableInvoiceForVendorInvoice(vendorInvoice: VendorInvoice): ReceivableInvoice | null {
+    const sub = subsRef.current.find(s => {
+      const asset = assetsRef.current.find(a => a.assetId === s.assetId);
+      return !!asset && (asset.poId === vendorInvoice.poId || (!!vendorInvoice.grnId && asset.grnId === vendorInvoice.grnId));
+    });
+    if (!sub || sub.status !== 'ACTIVE' || sub.nextInvoicePeriod > sub.termMonths) return null;
+
+    const period = sub.nextInvoicePeriod;
+    const issueDate = vendorInvoice.invoiceDate;
+    const due = new Date(issueDate); due.setDate(due.getDate() + 15);
+    const inv: ReceivableInvoice = {
+      id: 'RINV-' + pad(counters2.current.rinv++), subscriptionId: sub.id, customerName: sub.customerName,
+      period, amount: sub.monthlyPayment, issueDate, dueDate: due.toISOString().slice(0, 10), status: 'SENT',
+    };
+    setRInvoices2(l => [inv, ...l]);
+    setSubs2(l => l.map(s => s.id === sub.id ? { ...s, nextInvoicePeriod: s.nextInvoicePeriod + 1 } : s));
+    logEvent('RECEIVABLE_INVOICE_GENERATED', 'ReceivableInvoice', inv.id,
+      `Receivable invoice ${inv.id} auto-generated for ${sub.customerName}, period ${period}/${sub.termMonths}: $${inv.amount} — paired with vendor invoice ${vendorInvoice.id}.`);
+    return inv;
+  }
+
   const submitInvoice = useCallback((input: Omit<VendorInvoice,'id'|'status'|'matchResult'>): VendorInvoice => {
     const grn = input.grnId ? goodsReceipts.find(g => g.id === input.grnId) : undefined;
     // use ref for GRNs to get fresh data
@@ -350,6 +377,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setInvoices2(l => [invoice, ...l]);
     logAudit('INVOICE_SUBMITTED', 'Invoice', invoice.id, `${invoice.vendor} invoice submitted for ${invoice.amount.toLocaleString()} against ${invoice.poId}.`);
     logAudit(status === 'MATCHED' ? 'INVOICE_MATCHED' : 'INVOICE_EXCEPTION', 'Invoice', invoice.id, status === 'MATCHED' ? '3-way match successful (PO / POD / GRN).' : 'Exception raised during 3-way match validation.');
+    syncReceivableInvoiceForVendorInvoice(invoice);
     return invoice;
   }, [goodsReceipts, logAudit]);
 
@@ -387,6 +415,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setLeases2(l => l.map(ls => ls.id === lease.id ? { ...ls, nextInvoicePeriod: nextPeriod + 1 } : ls));
     logEvent('RECURRING_AP_INVOICE_GENERATED', 'Invoice', invoice.id,
       `Recurring invoice ${invoice.id} auto-generated for ${lease.vendor} on lease ${lease.id}, period ${nextPeriod}/${lease.termMonths}: $${invoice.amount.toLocaleString()}.`);
+    syncReceivableInvoiceForVendorInvoice(invoice);
     return invoice;
   }, [logAudit]);
 
@@ -472,6 +501,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setSubs2(l => [sub, ...l]);
     setAssets2(l => l.map(a => a.assetId === input.assetId ? { ...a, leaseStartDate: sub.startDate, leaseEndDate: sub.endDate, contract: sub.id } : a));
     logEvent('SUBSCRIPTION_CREATED', 'Subscription', sub.id, `DaaS subscription ${sub.id} created for ${sub.customerName}: ${sub.termMonths} mo @ $${sub.monthlyPayment}/mo (asset ${sub.assetId}).`);
+    // The vendor invoice that funded this asset may already exist (procurement
+    // usually runs before the customer signs up) — pair it with this new
+    // subscription's first-period receivable invoice right away.
+    const asset = assetsRef.current.find(a => a.assetId === input.assetId);
+    const fundingInvoice = asset
+      ? invoicesRef.current.find(i => i.poId === asset.poId || (!!asset.grnId && i.grnId === asset.grnId))
+      : undefined;
+    if (fundingInvoice) syncReceivableInvoiceForVendorInvoice(fundingInvoice);
     return sub;
   }, [logAudit]);
 

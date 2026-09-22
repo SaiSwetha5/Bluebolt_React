@@ -3,6 +3,7 @@ import { useData } from '../../store/DataContext';
 import VendorRequestPreview from '../../components/ui/VendorRequestPreview';
 import { MODEL_CATEGORIES } from '../../types/models';
 import type { ModelCategory, VendorName } from '../../types/models';
+import { useNavigate } from 'react-router-dom';
 
 export default function VendorOrderCreate() {
   const { catalog, purchaseOrders, purchaseRequisitions, createVendorOrder, submitVendorOrder, markPrConverted, fulfillFromWarehouse } = useData();
@@ -31,6 +32,7 @@ export default function VendorOrderCreate() {
   cognizantPo: '',
   warehouseAddress: '',
 });
+  const navigate = useNavigate();
 
   const totalCost = (Number(vrQuantity)||0) * (Number(vrUnitCost)||0);
 
@@ -53,6 +55,7 @@ export default function VendorOrderCreate() {
   const selectedCatalogItem = vrCatalogItemId ? catalog.find(c => c.id === vrCatalogItemId) : filteredCatalogItems.find(c => c.currentGenModel === vrCurrentGen);
   
 function onModelCategoryChange(cat: ModelCategory) {
+
   // Clear previous validation errors
   setVrError('');
   setQuantityError('');
@@ -62,6 +65,7 @@ function onModelCategoryChange(cat: ModelCategory) {
   setVrCurrentGen('');
   setVrSku1('');
   setVrCatalogItemId('');
+
 
   const first = catalog.find(
     (c) => c.modelCategory === cat
@@ -283,10 +287,15 @@ function submitVendorRequest() {
       catalogItemId: vrCatalogItemId || (selectedCatalogItem?.id ?? ''),
       cognizantPoOverride: vrCognizantPo,
     });
+
+          console.log("Coming till here  =b4 marking converted===============>")
+
     if (pr) markPrConverted(pr.id);
     setPreviewVoId(vo.id);
     setVrModelCategory(''); setVrCurrentGen(''); setVrSku1(''); setVrVendor(''); setVrQuantity(1); setVrUnitCost(0); setVrCatalogItemId(''); setVrCognizantPo(''); setVrChannel('Webshop Portal' as any); setVrDestination('Cognizant Warehouse'); setVrWarehouseAddress(''); setVrError('');
-  
+     
+      console.log("Coming till here  ================>")
+
   }
 
   function addCustomCatalogItem() {
@@ -579,8 +588,8 @@ onChange={(e) => {
         </div>
       </div>
 
-      <VendorRequestPreview voId={previewVoId} onClose={() => setPreviewVoId(null)} onConfirm={voId => { submitVendorOrder(voId); setPreviewVoId(null); }} />
-    </div>
+<VendorRequestPreview voId={previewVoId} onClose={() => setPreviewVoId(null)} onConfirm={(voId) => {  submitVendorOrder(voId);  setPreviewVoId(null); navigate('/procurement/orders');}} />
+  </div>
   );
 }
 

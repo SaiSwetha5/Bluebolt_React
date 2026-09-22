@@ -91,7 +91,7 @@ export default function SubscriptionDetail() {
             <div className="px-4 py-3 border-b border-slate-100"><h2 className="text-sm font-semibold text-slate-800">Leases &amp; Receipts</h2></div>
             <table className="w-full">
               <thead><tr>
-                <th className="a360-th">Invoice</th><th className="a360-th">Period</th><th className="a360-th">Amount</th>
+                <th className="a360-th">Leases</th><th className="a360-th">Period</th><th className="a360-th">Amount</th>
                 <th className="a360-th">Due</th><th className="a360-th">Status</th><th className="a360-th">Receipt</th><th className="a360-th"></th>
               </tr></thead>
               <tbody>

@@ -8,6 +8,9 @@ import type { ShipmentStatus, VendorOrder } from '../../types/models';
 const FLOW: ShipmentStatus[] = ['PENDING','LABEL_CREATED','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED'];
 const FILTERS: ('ALL' | ShipmentStatus)[] = ['ALL','PENDING','LABEL_CREATED','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERED','EXCEPTION'];
 
+
+
+  
 function stepsFor(vo: VendorOrder): TimelineStep[] {
   const currentIdx = FLOW.indexOf(vo.shipmentStatus ?? 'PENDING');
   return FLOW.map((s, i) => {
@@ -22,11 +25,32 @@ function nextStatus(vo: VendorOrder): ShipmentStatus | null {
 }
 
 export default function ShipmentTracking() {
+  const [search, setSearch] = useState('');
+
+
   const { vendorOrders, addShipmentEvent } = useData();
   const [active, setActive] = useState<'ALL' | ShipmentStatus>('ALL');
-  const filtered = useMemo(() =>
-    active === 'ALL' ? vendorOrders : vendorOrders.filter(v => (v.shipmentStatus ?? 'PENDING') === active),
-    [vendorOrders, active]);
+const filtered = useMemo(() => {
+  let results =
+    active === 'ALL'
+      ? vendorOrders
+      : vendorOrders.filter(
+          v => (v.shipmentStatus ?? 'PENDING') === active
+        );
+ 
+  if (search.trim()) {
+    const keyword = search.toLowerCase();
+ 
+    results = results.filter(
+      v =>
+        v.id.toLowerCase().includes(keyword) ||
+        v.poId.toLowerCase().includes(keyword)
+    );
+  }
+ 
+  return results;
+  }, [vendorOrders, active, search]);
+
 
   function advance(vo: VendorOrder) {
     const next = nextStatus(vo); if (!next) return;
@@ -41,11 +65,25 @@ export default function ShipmentTracking() {
         <p className="text-sm text-slate-500">Live status across warehouse and client-direct deliveries.</p>
       </div>
       <div className="a360-card p-3 flex flex-wrap gap-2">
+     <input
+    type="text"
+    className="a360-input w-40 shrink-0"
+    placeholder="VO/PO Number"
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+  />    
         {FILTERS.map(f => (
-          <button key={f} onClick={() => setActive(f)}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${active===f?'bg-brand-600 text-white border-brand-600':'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
-            {f==='ALL'?'All Orders':f.replace(/_/g,' ')}
-          </button>
+      <button
+      key={f}
+      onClick={() => setActive(f)}
+      className={`text-xs font-semibold px-3 py-1.5 rounded-full border whitespace-nowrap ${
+        active === f
+          ? 'bg-brand-600 text-white border-brand-600'
+          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+      }`}
+>
+      {f === 'ALL' ? 'All Orders' : f.replace(/_/g, ' ')}
+</button>
         ))}
       </div>
       <div className="space-y-4">

@@ -64,7 +64,7 @@ export default function VendorOrderList() {
                 </td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan={11} className="a360-td text-center text-slate-400 py-8">No vendor orders in this state.</td></tr>}
+            {!filtered.length && <tr><td colSpan={11} className="a360-td text-center text-slate-400 py-8">No vendor orders are present.</td></tr>}
           </tbody>
         </table>
       </div>

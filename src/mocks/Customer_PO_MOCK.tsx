@@ -1,96 +1,151 @@
- export const CUSTOMER_PO_MOCK  = {
-  "success" : true,
-  "data" : {
-    "orderNo" : "C11183-R1",
-    "contractId" : "C11183",
-    "revision" : "1",
-    "issuedOn" : "2026-04-14T00:00:00Z",
-    "createdOn" : "2026-04-14T00:00:00Z",
-    "createdBy" : "NoelPradeep Robinson (293933)",
-    "requester" : "NoelPradeep Robinson (293933)",
-    "poEndDate" : "2026-04-30T00:00:00Z",
-    "totalAmount" : 460.0,
-    "currency" : "USD",
-    "intakeStatus" : "PARSED",
-    "supplier" : {
-      "name" : "VMV CUBE INFOTECH FZCO",
-      "addressLine1" : "IFZA PROPERTIES DSO IFZA SILICON SASIS DUBAI SILICON OASIS",
-      "city" : "DUBAI",
-      "postalCode" : "000",
-      "country" : "United Arab Emirates",
-      "phone" : "+971-503527190-971",
-      "contactEmail" : "vivek.goswami@vmvcubeinfo.com",
-      "orderingAddress" : "IFZA PROPERTIES DSO IFZA SILICON SASIS DUBAI SILICON OASIS DUBAI, 000 United Arab Emirates"
+
+export const CUSTOMER_PO_MOCK = {
+  "success": true,
+  "data": {
+    "id": null,
+    "orderNo": "PO515366",
+    "contractId": null,
+    "revision": null,
+    "issuedOn": "2024-12-30T00:00:00Z",
+    "createdOn": "2024-12-30T00:00:00Z",
+    "createdBy": "Kanchi Reddy Anusha (488611)",
+    "requester": "Kanchi Reddy Anusha (488611)",
+    "poEndDate": "2027-12-26T00:00:00Z",
+    "totalAmount": 229840,
+    "currency": "USD",
+    "comments": "Parsed using PDF stream order because position-sorted extraction produced lower-quality fields.",
+    "intakeStatus": "PARSED",
+    "sourceFileName": null,
+    "supplier": {
+      "name": "NEXTHINK SA - USD (NL)",
+      "addressLine1": "Centre Malley Lumieres Chemin du Viaduc 1",
+      "addressLine2": null,
+      "city": "Prilly",
+      "postalCode": "1008",
+      "country": "Switzerland",
+      "phone": "+41 -+41 21 566 54 40-",
+      "contactEmail": "Kaushik.shah@nexthink.com",
+      "orderingAddress": "Centre Malley Lumieres Chemin du Viaduc 1 Prilly, 1008 Switzerland"
     },
-    "shipTo" : {
-      "name" : "Etix Everywhere zColo",
-      "addressLine1" : "16-18 Avenue de l'Europe,",
-      "city" : "78140 Velizy-Villacoublay,",
-      "country" : "France"
+    "shipTo": {
+      "name": "NLAMAMSA04 : Amsterdam - AM NLD, KBF",
+      "addressLine1": "Cognizant Technology Solutions Benelux B.V.",
+      "addressLine2": "(MA303), Paul van Vlissingenstraat 10C",
+      "city": "Amsterdam",
+      "postalCode": "1096 BK",
+      "country": "Netherlands"
     },
-    "billTo" : {
-      "name" : "FRPALDEA03 : Ariane - PA FRA, COG",
-      "company" : "Cognizant Technology Solution France SA (US406)",
-      "addressLine1" : "5 Place de la Pyramide Puteaux",
-      "city" : "La Defense",
-      "state" : "PA",
-      "postalCode" : "92800",
-      "country" : "France"
+    "billTo": {
+      "name": "NLAMAMSA04 : Amsterdam - AM NLD, KBF",
+      "company": null,
+      "addressLine1": "Cognizant Technology Solutions Benelux B.V.",
+      "addressLine2": "(MA303), Paul van Vlissingenstraat 10C",
+      "city": "Amsterdam",
+      "state": "AM",
+      "postalCode": "1096 BK",
+      "country": "Netherlands"
     },
-    "deliverTo" : {
-      "email" : "AMAN.MEHTA@cognizant.com",
-      "glBusinessUnit" : "Cognizant France",
-      "asset" : "NEXT",
-      "locationCode" : {
-        "id" : "FRPALDEA03",
-        "name" : "FRPALDEA03 : Ariane - PA FRA, COG",
-        "description" : "FRPALDEA03 : Ariane - PA FRA, COG",
-        "address" : "Cognizant Technology Solution France SA (US406) 5 Place de la Pyramide Puteaux",
-        "city" : "La Defense",
-        "state" : "PA",
-        "postalCode" : "92800",
-        "status" : "Standard",
-        "region" : "Europe"
+    "deliverTo": {
+      "email": "Suresh.Balasubramanian@cognizant.com",
+      "glBusinessUnit": "Cognizant Benelux B.V.",
+      "assetProfile": null,
+      "assetLocation": null,
+      "asset": null,
+      "locationCode": {
+        "id": "NLAMAMSA04",
+        "name": "NLAMAMSA04 : Amsterdam - AM NLD, KBF",
+        "description": "Amsterdam - AM NLD, KBF",
+        "address": "Cognizant Technology Solutions Benelux B.V.(MA303), Paul van Vlissingenstraat 10C,",
+        "city": "Netherlands",
+        "state": "AM",
+        "postalCode": "1096 BK",
+        "status": "Standard",
+        "region": "Europe"
       }
     },
-    "lineItems" : [ {
-      "lineNo" : 1,
-      "description" : "Dell Networking Cable QSFP28 to QSFP28 100GbE",
-      "fullDescription" : "Dell Networking Cable QSFP28 to QSFP28 100GbE Passive Copper Direct Attach Cable - 5 meter",
-      "partNumber" : "FN4FC",
-      "quantity" : 2,
-      "uom" : "each",
-      "needByDate" : "2026-04-16T00:00:00Z",
-      "unitPrice" : 230.0,
-      "netAmount" : 460.0,
-      "amount" : 460.0,
-      "currency" : "USD"
-    },{
-      "lineNo" : 2,
-      "description" : "HP",
-      "fullDescription" : "HP Cable - 5 meter",
-      "partNumber" : "FN1FC",
-      "quantity" : 21,
-      "uom" : "each",
-      "needByDate" : "2026-04-16T00:00:00Z",
-      "unitPrice" : 230.0,
-      "netAmount" : 460.0,
-      "amount" : 4610.0,
-      "currency" : "USD"
-    } ,{
-      "lineNo" : 3,
-      "description" : "Dell Networking Cable QSFP28 to QSFP28 100GbE",
-      "fullDescription" : "Dell Networking Cable QSFP28 to QSFP28 100GbE Passive Copper Direct Attach Cable - 5 meter",
-      "partNumber" : "FN4FC",
-      "quantity" : 24,
-      "uom" : "each",
-      "needByDate" : "2026-04-16T00:00:00Z",
-      "unitPrice" : 230.0,
-      "netAmount" : 460.0,
-      "amount" : 460.0,
-      "currency" : "USD"
-    }  ],
-    "documents" : [ ]
+    "lineItems": [
+      {
+        "id": null,
+        "lineNo": 1,
+        "description": "MSP Workplace Experience - Nexthink Infinity Subscription Qty 6000 for 3 Years NUMBER QTY NEED- BY DATE UNIT PRICE DISCOUNT NET AMOUNT CHARGES TAXES AMOUNT Description: Cognizant Benelux B.V. ID: NLAMAMSA04 Name: NLAMAMSA04 : Amsterdam - AM NLD, KBF Description: Amsterdam - AM NLD, KBF Address: Cognizant Technology Solutions Benelux B.V.(MA303), Paul van Vlissingenstraat 10C, Amsterdam City: Netherlands State: AM Postal: 1096 BK Location Status: Standard Region: Europe",
+        "fullDescription": "MSP Workplace Experience - Nexthink Infinity Subscription Qty 6000 for 3 Years NUMBER QTY NEED- BY DATE UNIT PRICE DISCOUNT NET AMOUNT CHARGES TAXES AMOUNT Description: Cognizant Benelux B.V. ID: NLAMAMSA04 Name: NLAMAMSA04 : Amsterdam - AM NLD, KBF Description: Amsterdam - AM NLD, KBF Address: Cognizant Technology Solutions Benelux B.V.(MA303), Paul van Vlissingenstraat 10C, Amsterdam City: Netherlands State: AM Postal: 1096 BK Location Status: Standard Region: Europe",
+        "partNumber": "SP-DIPC CS",
+        "quantity": 1,
+        "uom": "each",
+        "needByDate": "2024-12-31T00:00:00Z",
+        "unitPrice": 180000,
+        "discount": 0,
+        "netAmount": 180000,
+        "charges": null,
+        "taxes": null,
+        "amount": 180000,
+        "currency": "USD"
+      },
+      {
+        "id": null,
+        "lineNo": 2,
+        "description": "MSP Collaboration Experience - Nexthink Infinity Subscription- Qty 6000 for 3 Years NUMBER QTY NEED- BY DATE UNIT PRICE DISCOUNT NET AMOUNT CHARGES TAXES AMOUNT",
+        "fullDescription": "MSP Collaboration Experience - Nexthink Infinity Subscription- Qty 6000 for 3 Years NUMBER QTY NEED- BY DATE UNIT PRICE DISCOUNT NET AMOUNT CHARGES TAXES AMOUNT",
+        "partNumber": "SP-DICE CS",
+        "quantity": 1,
+        "uom": "each",
+        "needByDate": "2024-12-31T00:00:00Z",
+        "unitPrice": 18000,
+        "discount": 0,
+        "netAmount": 18000,
+        "charges": null,
+        "taxes": null,
+        "amount": 18000,
+        "currency": "USD"
+      },
+      {
+        "id": null,
+        "lineNo": 3,
+        "description": "Nexthink MSP Accelerate - Pro- Qty 6000 for 3 Years NUMBER QTY NEED- BY DATE UNIT PRICE DISCOUNT NET AMOUNT CHARGES TAXES AMOUNT",
+        "fullDescription": "Nexthink MSP Accelerate - Pro- Qty 6000 for 3 Years NUMBER QTY NEED- BY DATE UNIT PRICE DISCOUNT NET AMOUNT CHARGES TAXES AMOUNT",
+        "partNumber": "MSP ACCELERATE PRO-CS",
+        "quantity": 1,
+        "uom": "each",
+        "needByDate": "2024-12-31T00:00:00Z",
+        "unitPrice": 21840,
+        "discount": 0,
+        "netAmount": 21840,
+        "charges": null,
+        "taxes": null,
+        "amount": 21840,
+        "currency": "USD"
+      },
+      {
+        "id": null,
+        "lineNo": 4,
+        "description": "MSP Foundation - Infinity Basic - Off-Shore Rate - Billed in Advance",
+        "fullDescription": "MSP Foundation - Infinity Basic - Off-Shore Rate - Billed in Advance",
+        "partNumber": "SVC-MSP- FIB OFFSHORE- PCK",
+        "quantity": 1,
+        "uom": "each",
+        "needByDate": "2024-12-31T00:00:00Z",
+        "unitPrice": 10000,
+        "discount": 0,
+        "netAmount": 10000,
+        "charges": null,
+        "taxes": null,
+        "amount": 10000,
+        "currency": "USD"
+      }
+    ],
+    "summary": {
+      "totalLineItems": 4,
+      "totalQuantity": 4,
+      "totalUnitPrice": 229840,
+      "totalDiscount": 0,
+      "totalNetAmount": 229840,
+      "totalCharges": 0,
+      "totalTaxes": 0,
+      "totalAmount": 229840,
+      "currency": "USD"
+    },
+    "documents": []
   },
-  "timestamp" : "2026-09-04T12:38:48.471361600Z"
+  "message": null,
+  "timestamp": "2026-09-21T09:44:58.120044300Z"
 }
