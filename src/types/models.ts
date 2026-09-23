@@ -66,7 +66,7 @@ export interface VendorInvoice {
 }
 // A single payment run against one or more vendor invoices — supports paying
 // several APPROVED_FOR_PAYMENT invoices together in one batch/reference.
-export interface VendorPayment {
+
 export interface VendorPayment {
   id: string; invoiceIds: string[]; vendor: VendorName | 'MULTIPLE'; totalAmount: number;
   method: PaymentMethod; reference: string; paidAt: string;

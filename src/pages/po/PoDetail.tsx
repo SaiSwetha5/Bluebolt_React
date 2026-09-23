@@ -39,7 +39,7 @@ export default function PoDetail() {
     <div className="space-y-5">
       <div className="flex items-start justify-between">
         <div>
-          <Link to="/po" className="text-sm text-slate-500 hover:text-brand-600">← Back to Customer POs</Link>
+          <Link to="/po" className="text-sm text-slate-500 hover:text-brand-600">←Change Back to Customer POs</Link>
           <div className="flex items-center gap-3 mt-1">
             <h1 className="text-xl font-bold text-slate-900">{po.poNumber}</h1>
             <StatusBadge status={po.status} />

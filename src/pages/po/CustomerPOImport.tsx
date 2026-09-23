@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useData } from '../../store/DataContext';
 import { CUSTOMER_PO_MOCK } from '../../mocks/Customer_PO_MOCK';
 import { getPOExtractUrl } from '../../config/api.config';
 
-// --- Reusable Atomic Form Field Component ---
 interface FormFieldProps {
   label: string;
   value?: string | number | null;
@@ -12,6 +11,7 @@ interface FormFieldProps {
   readOnly?: boolean;
   className?: string;
   isMono?: boolean;
+  onChange?: (val: string) => void;
 }
 
 export const FormField: React.FC<FormFieldProps> = ({
@@ -21,6 +21,7 @@ export const FormField: React.FC<FormFieldProps> = ({
   readOnly = true,
   className = '',
   isMono = false,
+  onChange,
 }) => (
   <div className={`space-y-1 ${className}`}>
     <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
@@ -31,14 +32,16 @@ export const FormField: React.FC<FormFieldProps> = ({
       readOnly={readOnly}
       value={value !== undefined && value !== null && value !== '' ? String(value) : ''}
       placeholder={placeholder}
-      className={`w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
-        isMono ? 'font-mono' : ''
-      }`}
+      onChange={(e) => onChange && onChange(e.target.value)}
+      className={`w-full px-3 py-1.5 text-xs border rounded-md transition-colors ${
+        readOnly
+          ? 'bg-slate-50 text-slate-700 border-slate-200 cursor-not-allowed'
+          : 'bg-white text-slate-900 border-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-500'
+      } ${isMono ? 'font-mono' : ''}`}
     />
   </div>
 );
 
-// --- Collapsible Accordion Section ---
 interface AccordionSectionProps {
   title: string;
   countBadge?: string | number;
@@ -89,7 +92,6 @@ export const AccordionSection: React.FC<AccordionSectionProps> = ({
   );
 };
 
-// --- Interfaces ---
 export interface LineItem {
   lineNo: number;
   description: string;
@@ -116,18 +118,24 @@ interface UploadDebugState {
   errorMessage?: string;
 }
 
-export default function CustomerPoUpload() {
-  console.log('🚀 [COMPONENT] CustomerPoUpload component mounted');
-  
+export default function CustomerPOImport() {
   const navigate = useNavigate();
+  const location = useLocation();
   const dataContext = useData();
 
-  // Extract handlers from context safely
-  const { intakePO, catalog = [] } = dataContext || {};
-  
-  console.log('📊 [CONTEXT] DataContext loaded', { hasCatalog: catalog.length > 0, hasIntakePO: typeof intakePO === 'function' });
+  const { intakePO, updatePO, catalog = [] } = dataContext || {};
 
-  // Upload & parse tracking
+  // Retrieve incoming PO record passed directly from the selected row in PoList
+  const passedRecord = (location.state as any)?.poRecord;
+  const isExistingPO = Boolean(passedRecord);
+
+  const [poStatus, setPoStatus] = useState<string>('RECEIVED');
+
+  // Business Rules for Editability
+  const isApproved = poStatus === 'APPROVED';
+  const isRejected = poStatus === 'REJECTED';
+  const isReadOnly = isApproved;
+
   const [poFile, setPoFile] = useState<File | null>(null);
   const [, setAdditionalFiles] = useState<FileList | null>(null);
   const [isParsing, setIsParsing] = useState(false);
@@ -139,7 +147,21 @@ export default function CustomerPoUpload() {
     startedAt: '',
   });
 
-  // 1. PO Header & Party metadata
+  // Approval Modal State
+  const [approvalModal, setApprovalModal] = useState<{
+    isOpen: boolean;
+    action: 'APPROVED' | 'REJECTED';
+    remarks: string;
+    justification: string;
+    error?: string;
+  }>({
+    isOpen: false,
+    action: 'APPROVED',
+    remarks: '',
+    justification: '',
+    error: '',
+  });
+
   const [poData, setPoData] = useState<any>({
     orderNo: '',
     customerName: '',
@@ -158,13 +180,12 @@ export default function CustomerPoUpload() {
     shipTo: null,
     billTo: null,
     deliverTo: null,
+    approvalHistory: [],
   });
 
-  // 2. Line items state
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number>(-1);
 
-  // Form State (Above Table)
   const [editForm, setEditForm] = useState<Partial<LineItem>>({
     partNumber: '',
     catalogMatch: '',
@@ -176,12 +197,60 @@ export default function CustomerPoUpload() {
     billingMethod: 'Monthly',
   });
 
-  // Handle PDF Upload & Trigger Extraction into form
-const handlePdfUpload = async (file: File) => {
+  // Prefill the form whenever a row is passed via state
+  useEffect(() => {
+    if (passedRecord) {
+      setPoStatus(passedRecord.status || 'RECEIVED');
+      setPoData({
+        orderNo: passedRecord.poNumber || '',
+        customerName: passedRecord.clientName || '',
+        contractId: passedRecord.contractId || '',
+        revision: passedRecord.revision || '',
+        issuedOn: passedRecord.issuedOn || '',
+        createdOn: passedRecord.createdOn || passedRecord.submittedAt || '',
+        createdBy: passedRecord.createdBy || '',
+        requester: passedRecord.requester || '',
+        poEndDate: passedRecord.poEndDate || '',
+        totalAmount: passedRecord.totalAmount || 0,
+        currency: passedRecord.currency || 'USD',
+        intakeStatus: passedRecord.status || 'RECEIVED',
+        shipment: passedRecord.shipment || 'Air Freight',
+        supplier: passedRecord.supplier || null,
+        shipTo: passedRecord.shipTo || null,
+        billTo: passedRecord.billTo || null,
+        deliverTo: passedRecord.deliverTo || null,
+        approvalHistory: passedRecord.approvalHistory || [],
+      });
+
+      if (passedRecord.lineItems && passedRecord.lineItems.length > 0) {
+        setLineItems(passedRecord.lineItems);
+        setSelectedIdx(0);
+      } else {
+        setLineItems([
+          {
+            lineNo: 1,
+            description: 'Item Details',
+            partNumber: passedRecord.partNumber || 'FN4FC',
+            catalogMatch: passedRecord.catalogItemId || passedRecord.partNumber || 'FN4FC',
+            entityName: passedRecord.clientName || '',
+            entityCode: '',
+            quantity: passedRecord.quantity || 1,
+            unitPrice: passedRecord.unitCost || 0,
+            netAmount: (passedRecord.quantity || 1) * (passedRecord.unitCost || 0),
+            amount: passedRecord.totalAmount || (passedRecord.quantity || 1) * (passedRecord.unitCost || 0),
+            billingMethod: 'Monthly',
+          },
+        ]);
+        setSelectedIdx(0);
+      }
+      setIsParsed(true);
+    }
+  }, [passedRecord]);
+
+  const handlePdfUpload = async (file: File) => {
     const requestUrl = getPOExtractUrl();
     const startedAt = new Date().toLocaleTimeString();
 
-    console.log('➤ [ENTRY] handlePdfUpload - Starting PDF upload process', { fileName: file.name, fileSize: file.size });
     setPoFile(file);
     setIsParsing(true);
     setUploadDebug({
@@ -192,15 +261,12 @@ const handlePdfUpload = async (file: File) => {
     });
 
     try {
-      // 1. DELETE OR COMMENT OUT THIS SINGLE LINE TO USE THE REAL API:
       let extractedData: any = CUSTOMER_PO_MOCK.data;
 
-      // 2. If the mock line above is commented out, execute the actual API request:
       if (!extractedData) {
         const formData = new FormData();
         formData.append('file', file);
 
-        console.log('⏳ [PROCESS] Sending PDF to API endpoint:', requestUrl);
         setUploadDebug((prev) => ({ ...prev, phase: 'requesting' }));
 
         const response = await fetch(requestUrl, {
@@ -213,14 +279,8 @@ const handlePdfUpload = async (file: File) => {
         }
 
         const json = await response.json();
-        // Normalizes whether API returns { data: { ... } } or { ... }
         extractedData = json.data ?? json;
       }
-
-      console.log('✓ [SUCCESS] PDF extraction successful', {
-        poNumber: extractedData.orderNo,
-        lineItems: extractedData.lineItems?.length || 0,
-      });
 
       setUploadDebug((prev) => ({
         ...prev,
@@ -228,7 +288,6 @@ const handlePdfUpload = async (file: File) => {
         errorMessage: undefined,
       }));
 
-      // Single mapping block for state updates
       setPoData({
         orderNo: extractedData.orderNo || '',
         contractId: extractedData.contractId || '',
@@ -240,13 +299,14 @@ const handlePdfUpload = async (file: File) => {
         poEndDate: extractedData.poEndDate || '',
         totalAmount: extractedData.totalAmount || 0,
         currency: extractedData.currency || 'USD',
-        intakeStatus: extractedData.intakeStatus || 'AWAITING_UPLOAD',
+        intakeStatus: extractedData.intakeStatus || 'RECEIVED',
         customerName: extractedData.customerName || extractedData.billTo?.company || 'Customer',
         shipment: extractedData.shipment || 'Air Freight',
         supplier: extractedData.supplier || null,
         shipTo: extractedData.shipTo || null,
         billTo: extractedData.billTo || null,
         deliverTo: extractedData.deliverTo || null,
+        approvalHistory: [],
       });
 
       const parsedItems: LineItem[] = (extractedData.lineItems || []).map((item: any, idx: number) => ({
@@ -270,9 +330,7 @@ const handlePdfUpload = async (file: File) => {
         setSelectedIdx(0);
       }
       setIsParsed(true);
-      console.log('✓ [EXIT] handlePdfUpload - Process completed', { totalLineItems: parsedItems.length });
     } catch (error) {
-      console.error('❌ [ERROR] handlePdfUpload failed:', error);
       setUploadDebug((prev) => ({
         ...prev,
         phase: 'error',
@@ -284,17 +342,8 @@ const handlePdfUpload = async (file: File) => {
   };
 
   useEffect(() => {
-    console.log('➤ [LIFECYCLE] useEffect triggered', { selectedIdx, lineItemsCount: lineItems.length });
-    
     if (lineItems.length > 0 && selectedIdx >= 0 && selectedIdx < lineItems.length) {
       const active = lineItems[selectedIdx];
-      console.log('📌 [UPDATE] Setting editForm for selected row', { 
-        rowIndex: selectedIdx, 
-        partNumber: active.partNumber,
-        quantity: active.quantity,
-        unitPrice: active.unitPrice 
-      });
-      
       setEditForm({
         partNumber: active.partNumber,
         catalogMatch: active.catalogMatch || active.partNumber,
@@ -305,8 +354,6 @@ const handlePdfUpload = async (file: File) => {
         amount: active.amount,
         billingMethod: active.billingMethod || 'Monthly',
       });
-    } else {
-      console.log('⚠️ [WARNING] useEffect - Invalid state for editForm update', { selectedIdx, lineItemsCount: lineItems.length });
     }
   }, [selectedIdx, lineItems]);
 
@@ -317,12 +364,7 @@ const handlePdfUpload = async (file: File) => {
   }, [lineItems]);
 
   const handleEditChange = (field: keyof LineItem, val: any) => {
-    console.log('➤ [ENTRY] handleEditChange', { selectedRow: selectedIdx + 1, field, newValue: val });
-    
-    if (selectedIdx < 0 || selectedIdx >= lineItems.length) {
-      console.warn('⚠️ [WARNING] Invalid selectedIdx:', selectedIdx);
-      return;
-    }
+    if (isReadOnly || selectedIdx < 0 || selectedIdx >= lineItems.length) return;
 
     setLineItems((prev) => {
       const updated = [...prev];
@@ -335,7 +377,6 @@ const handlePdfUpload = async (file: File) => {
         current.unitPrice = price;
         current.amount = qty * price;
         current.netAmount = qty * price;
-        console.log('🧮 [CALC] Amount recalculated', { qty, price, amount: current.amount });
       }
 
       updated[selectedIdx] = current;
@@ -351,13 +392,10 @@ const handlePdfUpload = async (file: File) => {
       }
       return next;
     });
-
-    console.log('✓ [EXIT] handleEditChange - Field updated successfully');
   };
 
   const handleAddNewItem = () => {
-    console.log('➤ [ENTRY] handleAddNewItem - Adding new line item');
-    
+    if (isReadOnly) return;
     const newItem: LineItem = {
       lineNo: lineItems.length + 1,
       description: 'Peripheral / Equipment Bundle',
@@ -374,46 +412,31 @@ const handlePdfUpload = async (file: File) => {
     const updated = [...lineItems, newItem];
     setLineItems(updated);
     setSelectedIdx(updated.length - 1);
-    
-    console.log('✓ [EXIT] handleAddNewItem - New line item added', { totalItems: updated.length, newLineNo: newItem.lineNo });
   };
 
   const handleDeleteRow = (e: React.MouseEvent, indexToDelete: number) => {
-    console.log('➤ [ENTRY] handleDeleteRow', { rowIndex: indexToDelete, partNumber: lineItems[indexToDelete]?.partNumber });
-    
     e.stopPropagation();
+    if (isReadOnly) return;
     if (lineItems.length === 1) {
-      console.warn('⚠️ [WARNING] Cannot delete - only one line item remaining');
       alert('A purchase order requires at least one line item.');
       return;
     }
-    
-    const deletedItem = lineItems[indexToDelete];
     const updated = lineItems.filter((_, idx) => idx !== indexToDelete);
     setLineItems(updated);
     if (selectedIdx >= updated.length) {
       setSelectedIdx(updated.length - 1);
     }
-    
-    console.log('✓ [EXIT] handleDeleteRow - Line item deleted', { deletedPartNumber: deletedItem?.partNumber, remainingItems: updated.length });
   };
 
-  // --- SAVE PURCHASE ORDER: Formatted to match PoList columns ---
-  const handleSavePo = () => {
-    console.log('➤ [ENTRY] handleSavePo - Starting PO save process');
-    console.log('📋 [DATA] Current form state', { isParsed, lineItemsCount: lineItems.length, totalAmount: grandTotal });
-    
+  const handleSaveOrResubmit = (isResubmission = false) => {
     if (!isParsed && lineItems.length === 0) {
-      console.warn('⚠️ [VALIDATION] No PO data to save');
       alert('Please upload a PO PDF or configure line items before saving.');
       return;
     }
 
     const firstItem = lineItems[0] || {};
     const averageUnitCost = totalUnits > 0 ? Math.round((grandTotal / totalUnits) * 100) / 100 : 0;
-    const generatedId = `CPO-${Math.floor(100000 + Math.random() * 900000)}`;
-
-    console.log('🏢 [MAPPING] Location details', { city: poData.deliverTo?.locationCode?.city, state: poData.deliverTo?.locationCode?.state });
+    const currentId = passedRecord?.id || `CPO-${Math.floor(100000 + Math.random() * 900000)}`;
 
     const city = poData.deliverTo?.locationCode?.city || poData.billTo?.city || poData.shipTo?.city || 'La Defense';
     const state = poData.deliverTo?.locationCode?.state || poData.billTo?.state || 'PA';
@@ -427,16 +450,14 @@ const handlePdfUpload = async (file: File) => {
       )
     );
 
-    console.log('🔍 [CATALOG] Catalog matching result', { found: !!matchedCatalogItem, catalogItemId: matchedCatalogItem?.id });
-
-    // Complete schema adhering to PoList and DataContext models
     const unifiedPoRecord = {
-      id: generatedId,
+      ...(passedRecord || {}),
+      id: currentId,
       poNumber: poData.orderNo || `PO-${Date.now().toString().slice(-6)}`,
       clientName: poData.customerName || poData.billTo?.company || 'Cognizant Internal',
       partNumber: firstItem.partNumber || 'FN4FC',
       catalogItemId: matchedCatalogItem?.id || 'CAT-14STD',
-      source: poFile ? 'PDF_IMPORT' : 'API',
+      source: passedRecord?.source || (poFile ? 'PDF_IMPORT' : 'API'),
       quantity: totalUnits,
       unitCost: averageUnitCost,
       totalAmount: grandTotal,
@@ -444,112 +465,222 @@ const handlePdfUpload = async (file: File) => {
       city,
       state,
       country,
-      status: 'RECEIVED',
-      submittedAt: new Date().toISOString(),
-      fileName: poFile ? poFile.name : undefined,
+      status: isResubmission ? 'PENDING_APPROVAL' : passedRecord ? poStatus : 'RECEIVED',
+      submittedAt: passedRecord?.submittedAt || new Date().toISOString(),
+      fileName: poFile ? poFile.name : passedRecord?.fileName,
       notes: `Supplier: ${poData.supplier?.name || 'N/A'} | Line Items: ${lineItems.length}`,
       ...poData,
       lineItems,
     };
 
-    console.log('📝 [RECORD] Generated PO record', { 
-      id: unifiedPoRecord.id, 
-      poNumber: unifiedPoRecord.poNumber, 
-      clientName: unifiedPoRecord.clientName,
-      totalAmount: unifiedPoRecord.totalAmount,
-      lineItemsCount: unifiedPoRecord.lineItems.length 
-    });
-
-    // Call store action
-    if (typeof intakePO === 'function') {
-      console.log('💾 [ACTION] Calling intakePO to save PO to data store');
+    if (passedRecord && typeof updatePO === 'function') {
+      updatePO(unifiedPoRecord);
+    } else if (typeof intakePO === 'function') {
       intakePO(unifiedPoRecord);
-      console.log('✓ [SUCCESS] PO saved to data store successfully');
-    } else {
-      console.error('❌ [ERROR] intakePO function not available');
     }
 
-    // Navigate to PO List to immediately view the table update
-    console.log('🔀 [NAVIGATE] Redirecting to PO list page');
     navigate('/po');
-    console.log('✓ [EXIT] handleSavePo - Completed successfully');
+  };
+
+  const handleApprovalActionSubmit = () => {
+    if (!approvalModal.remarks.trim() || !approvalModal.justification.trim()) {
+      setApprovalModal((prev) => ({
+        ...prev,
+        error: 'Both Remarks and Justification are mandatory for approval actions.',
+      }));
+      return;
+    }
+
+    const nextStatus = approvalModal.action;
+    const historyEntry = {
+      action: nextStatus,
+      remarks: approvalModal.remarks.trim(),
+      justification: approvalModal.justification.trim(),
+      timestamp: new Date().toISOString(),
+      actionBy: 'Approver',
+    };
+
+    const updatedPo = {
+      ...(passedRecord || {}),
+      ...poData,
+      status: nextStatus,
+      approvalHistory: [...(poData.approvalHistory || []), historyEntry],
+      lineItems,
+      totalAmount: grandTotal,
+      quantity: totalUnits,
+    };
+
+    if (typeof updatePO === 'function') {
+      updatePO(updatedPo);
+    } else if (typeof intakePO === 'function') {
+      intakePO(updatedPo);
+    }
+
+    setPoStatus(nextStatus);
+    setApprovalModal({ isOpen: false, action: 'APPROVED', remarks: '', justification: '', error: '' });
   };
 
   return (
     <div className="pb-20 mx-auto space-y-6 max-w-7xl">
-      {/* 0. Top Upload Section */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
-          <h2 className="text-sm font-bold text-slate-800">Upload Customer PO PDF</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Upload your PO PDF document to parse and auto-populate all sections.
-          </p>
-          <div className="flex items-center gap-3 mt-3">
-            <label className="inline-flex items-center px-4 py-2 text-xs font-semibold text-white transition-colors bg-indigo-600 rounded-lg shadow-sm cursor-pointer hover:bg-indigo-700">
-              <span>{isParsing ? 'Parsing Document...' : 'Upload & Parse PDF'}</span>
-              <input
-                type="file"
-                accept=".pdf"
-                className="hidden"
-                disabled={isParsing}
-                onChange={(e) => {
-                  if (e.target.files?.[0]) handlePdfUpload(e.target.files[0]);
-                }}
-              />
-            </label>
-            {isParsing && <span className="text-xs font-medium text-indigo-600 animate-pulse">Extracting data...</span>}
-          </div>
-          <p className="mt-2 text-xs font-medium text-slate-500">
-            Attached:{' '}
-            <span className={poFile ? 'text-indigo-600 font-semibold' : 'text-slate-400'}>
-              {poFile ? poFile.name : 'No file chosen'}
+      {/* Top Banner & Status Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-lg font-bold text-slate-800">
+              {isExistingPO ? `Customer PO: ${passedRecord?.poNumber || passedRecord?.id}` : 'Customer PO Intake & Edit'}
+            </h1>
+            <span
+              className={`px-3 py-1 text-xs font-bold rounded-full border ${
+                poStatus === 'APPROVED'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : poStatus === 'REJECTED'
+                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                  : poStatus === 'PENDING_APPROVAL'
+                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                  : 'bg-blue-50 text-blue-700 border-blue-200'
+              }`}
+            >
+              Approval Status: {poStatus.replace(/_/g, ' ')}
             </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {isApproved
+              ? 'This purchase order has been APPROVED and is locked in read-only mode.'
+              : isRejected
+              ? 'This purchase order was REJECTED. You can edit line items and resubmit for approval.'
+              : 'Unified view and editing screen for Customer Purchase Orders.'}
           </p>
-          {uploadDebug.phase !== 'idle' && (
-            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-semibold uppercase tracking-wider text-slate-500">Request Debug</span>
-                <span className="font-semibold text-slate-700">{uploadDebug.phase}</span>
-              </div>
-              <div className="mt-2 space-y-1">
-                <div>
-                  File: <span className="font-medium text-slate-800">{uploadDebug.fileName || 'N/A'}</span>
-                </div>
-                <div>
-                  Started: <span className="font-medium text-slate-800">{uploadDebug.startedAt || 'N/A'}</span>
-                </div>
-                <div className="break-all">
-                  URL: <span className="font-mono text-slate-800">{uploadDebug.requestUrl || 'N/A'}</span>
-                </div>
-                <div>
-                  HTTP Status:{' '}
-                  <span className="font-medium text-slate-800">
-                    {uploadDebug.responseStatus ? `${uploadDebug.responseStatus} ${uploadDebug.responseStatusText || ''}` : 'No response yet'}
-                  </span>
-                </div>
-                {uploadDebug.errorMessage && (
-                  <div className="break-words text-rose-600">
-                    Error: <span className="font-medium">{uploadDebug.errorMessage}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
-        <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
-          <h2 className="text-sm font-bold text-slate-800">Upload Additional Files</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Attach supporting documentation (.xlsx, .doc, .msg, .pdf).</p>
-          <div className="flex items-center gap-2 mt-3">
-        <input
-      type="file"
-      multiple
-      className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-500 cursor-not-allowed"
-      onChange={(e) => setAdditionalFiles(e.target.files)}
-    />
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/po')}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+          >
+            Back to PO Listing
+          </button>
+
+          {!isApproved && !isRejected && isExistingPO && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  setApprovalModal({ isOpen: true, action: 'APPROVED', remarks: '', justification: '', error: '' })
+                }
+                className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm cursor-pointer"
+              >
+                Approve PO
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setApprovalModal({ isOpen: true, action: 'REJECTED', remarks: '', justification: '', error: '' })
+                }
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm cursor-pointer"
+              >
+                Reject PO
+              </button>
+            </>
+          )}
+
+          {isRejected && (
+            <button
+              type="button"
+              onClick={() => handleSaveOrResubmit(true)}
+              className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm cursor-pointer"
+            >
+              Resubmit for Approval
+            </button>
+          )}
+
+          {!isApproved && !isRejected && (
+            <button
+              type="button"
+              onClick={() => handleSaveOrResubmit(false)}
+              className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm cursor-pointer"
+            >
+              {isExistingPO ? 'Save Changes' : 'Save Customer Purchase Order'}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* 0. Top Upload Section (Only visible during new intake) */}
+      {!isExistingPO && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
+            <h2 className="text-sm font-bold text-slate-800">Upload Customer PO PDF</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Upload your PO PDF document to parse and auto-populate all sections.
+            </p>
+            <div className="flex items-center gap-3 mt-3">
+              <label className="inline-flex items-center px-4 py-2 text-xs font-semibold text-white transition-colors bg-indigo-600 rounded-lg shadow-sm cursor-pointer hover:bg-indigo-700">
+                <span>{isParsing ? 'Parsing Document...' : 'Upload & Parse PDF'}</span>
+                <input
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  disabled={isParsing}
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handlePdfUpload(e.target.files[0]);
+                  }}
+                />
+              </label>
+              {isParsing && <span className="text-xs font-medium text-indigo-600 animate-pulse">Extracting data...</span>}
+            </div>
+            <p className="mt-2 text-xs font-medium text-slate-500">
+              Attached:{' '}
+              <span className={poFile ? 'text-indigo-600 font-semibold' : 'text-slate-400'}>
+                {poFile ? poFile.name : 'No file chosen'}
+              </span>
+            </p>
+            {uploadDebug.phase !== 'idle' && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold uppercase tracking-wider text-slate-500">Request Debug</span>
+                  <span className="font-semibold text-slate-700">{uploadDebug.phase}</span>
+                </div>
+                <div className="mt-2 space-y-1">
+                  <div>
+                    File: <span className="font-medium text-slate-800">{uploadDebug.fileName || 'N/A'}</span>
+                  </div>
+                  <div>
+                    Started: <span className="font-medium text-slate-800">{uploadDebug.startedAt || 'N/A'}</span>
+                  </div>
+                  <div className="break-all">
+                    URL: <span className="font-mono text-slate-800">{uploadDebug.requestUrl || 'N/A'}</span>
+                  </div>
+                  <div>
+                    HTTP Status:{' '}
+                    <span className="font-medium text-slate-800">
+                      {uploadDebug.responseStatus ? `${uploadDebug.responseStatus} ${uploadDebug.responseStatusText || ''}` : 'No response yet'}
+                    </span>
+                  </div>
+                  {uploadDebug.errorMessage && (
+                    <div className="break-words text-rose-600">
+                      Error: <span className="font-medium">{uploadDebug.errorMessage}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
+            <h2 className="text-sm font-bold text-slate-800">Upload Additional Files</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Attach supporting documentation (.xlsx, .doc, .msg, .pdf).</p>
+            <div className="flex items-center gap-2 mt-3">
+              <input
+                type="file"
+                multiple
+                className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-500 cursor-not-allowed"
+                onChange={(e) => setAdditionalFiles(e.target.files)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 1. PO Header Details */}
       <div className="p-5 space-y-3 bg-white border shadow-sm border-slate-200 rounded-xl">
@@ -559,24 +690,95 @@ const handlePdfUpload = async (file: File) => {
             <h3 className="text-xs font-bold tracking-wider uppercase text-slate-700">1. PO Header Details</h3>
           </div>
           <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
-            isParsed ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'
+            isApproved ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'
           }`}>
-            Status: {poData.intakeStatus}
+            Status: {poStatus}
           </span>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-          <FormField label="PO Order No" value={poData.orderNo} placeholder="e.g. C11183-R1" isMono />
-          <FormField label="Customer Name" value={poData.customerName} placeholder="Customer company" />
-          <FormField label="Contract ID" value={poData.contractId} placeholder="Contract ref" isMono />
-          <FormField label="Revision" value={poData.revision} placeholder="Rev #" isMono />
-          <FormField label="Issued On" value={poData.issuedOn ? new Date(poData.issuedOn).toLocaleDateString() : ''} placeholder="MM/DD/YYYY" />
-          <FormField label="Created On" value={poData.createdOn ? new Date(poData.createdOn).toLocaleDateString() : ''} placeholder="MM/DD/YYYY" />
-          <FormField label="Created By" value={poData.createdBy} placeholder="Created by user" />
-          <FormField label="Requester" value={poData.requester} placeholder="Requester name" />
-          <FormField label="PO End Date" value={poData.poEndDate ? new Date(poData.poEndDate).toLocaleDateString() : ''} placeholder="MM/DD/YYYY" />
-          <FormField label="Total Amount" value={isParsed || grandTotal > 0 ? `$${grandTotal.toFixed(2)}` : ''} placeholder="$0.00" isMono />
-          <FormField label="Currency" value={poData.currency} />
-          <FormField label="Shipment Mode" value={poData.shipment} placeholder="e.g. Air Freight" />
+          <FormField
+            label="PO Order No"
+            value={poData.orderNo}
+            placeholder="e.g. C11183-R1"
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, orderNo: val })}
+            isMono
+          />
+          <FormField
+            label="Customer Name"
+            value={poData.customerName}
+            placeholder="Customer company"
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, customerName: val })}
+          />
+          <FormField
+            label="Contract ID"
+            value={poData.contractId}
+            placeholder="Contract ref"
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, contractId: val })}
+            isMono
+          />
+          <FormField
+            label="Revision"
+            value={poData.revision}
+            placeholder="Rev #"
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, revision: val })}
+            isMono
+          />
+          <FormField
+            label="Issued On"
+            value={poData.issuedOn ? new Date(poData.issuedOn).toLocaleDateString() : ''}
+            placeholder="MM/DD/YYYY"
+            readOnly={isReadOnly}
+          />
+          <FormField
+            label="Created On"
+            value={poData.createdOn ? new Date(poData.createdOn).toLocaleDateString() : ''}
+            placeholder="MM/DD/YYYY"
+            readOnly={isReadOnly}
+          />
+          <FormField
+            label="Created By"
+            value={poData.createdBy}
+            placeholder="Created by user"
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, createdBy: val })}
+          />
+          <FormField
+            label="Requester"
+            value={poData.requester}
+            placeholder="Requester name"
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, requester: val })}
+          />
+          <FormField
+            label="PO End Date"
+            value={poData.poEndDate ? new Date(poData.poEndDate).toLocaleDateString() : ''}
+            placeholder="MM/DD/YYYY"
+            readOnly={isReadOnly}
+          />
+          <FormField
+            label="Total Amount"
+            value={isParsed || grandTotal > 0 ? `$${grandTotal.toFixed(2)}` : ''}
+            placeholder="$0.00"
+            readOnly
+            isMono
+          />
+          <FormField
+            label="Currency"
+            value={poData.currency}
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, currency: val })}
+          />
+          <FormField
+            label="Shipment Mode"
+            value={poData.shipment}
+            placeholder="e.g. Air Freight"
+            readOnly={isReadOnly}
+            onChange={(val) => setPoData({ ...poData, shipment: val })}
+          />
         </div>
       </div>
 
@@ -584,52 +786,52 @@ const handlePdfUpload = async (file: File) => {
       <div className="space-y-3">
         <AccordionSection title="Supplier Details" accentColor="bg-blue-600" isOpenDefault={false}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <FormField label="Supplier Name" value={poData.supplier?.name} />
-            <FormField label="Contact Phone" value={poData.supplier?.phone} />
-            <FormField label="Contact Email" value={poData.supplier?.contactEmail} />
-            <FormField label="Postal Code" value={poData.supplier?.postalCode} isMono />
-            <FormField label="Address Line 1" value={poData.supplier?.addressLine1} className="md:col-span-2" />
-            <FormField label="City" value={poData.supplier?.city} />
-            <FormField label="Country" value={poData.supplier?.country} />
-            <FormField label="Ordering Address" value={poData.supplier?.orderingAddress} className="md:col-span-4" />
+            <FormField label="Supplier Name" value={poData.supplier?.name} readOnly={isReadOnly} />
+            <FormField label="Contact Phone" value={poData.supplier?.phone} readOnly={isReadOnly} />
+            <FormField label="Contact Email" value={poData.supplier?.contactEmail} readOnly={isReadOnly} />
+            <FormField label="Postal Code" value={poData.supplier?.postalCode} isMono readOnly={isReadOnly} />
+            <FormField label="Address Line 1" value={poData.supplier?.addressLine1} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField label="City" value={poData.supplier?.city} readOnly={isReadOnly} />
+            <FormField label="Country" value={poData.supplier?.country} readOnly={isReadOnly} />
+            <FormField label="Ordering Address" value={poData.supplier?.orderingAddress} className="md:col-span-4" readOnly={isReadOnly} />
           </div>
         </AccordionSection>
 
         <AccordionSection title="Ship To Address" accentColor="bg-indigo-600" isOpenDefault={false}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <FormField label="Facility / Attention" value={poData.shipTo?.name} className="md:col-span-2" />
-            <FormField label="City" value={poData.shipTo?.city} />
-            <FormField label="Country" value={poData.shipTo?.country} />
-            <FormField label="Address Line 1" value={poData.shipTo?.addressLine1} className="md:col-span-4" />
+            <FormField label="Facility / Attention" value={poData.shipTo?.name} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField label="City" value={poData.shipTo?.city} readOnly={isReadOnly} />
+            <FormField label="Country" value={poData.shipTo?.country} readOnly={isReadOnly} />
+            <FormField label="Address Line 1" value={poData.shipTo?.addressLine1} className="md:col-span-4" readOnly={isReadOnly} />
           </div>
         </AccordionSection>
 
         <AccordionSection title="Bill To Address & Entity" accentColor="bg-emerald-600" isOpenDefault={false}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <FormField label="Billing Entity / Contact" value={poData.billTo?.name} />
-            <FormField label="Company Name" value={poData.billTo?.company} className="md:col-span-2" />
-            <FormField label="Postal / ZIP Code" value={poData.billTo?.postalCode} isMono />
-            <FormField label="Address Line 1" value={poData.billTo?.addressLine1} className="md:col-span-2" />
-            <FormField label="City" value={poData.billTo?.city} />
-            <FormField label="State / Region" value={poData.billTo?.state} />
-            <FormField label="Country" value={poData.billTo?.country} />
+            <FormField label="Billing Entity / Contact" value={poData.billTo?.name} readOnly={isReadOnly} />
+            <FormField label="Company Name" value={poData.billTo?.company} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField label="Postal / ZIP Code" value={poData.billTo?.postalCode} isMono readOnly={isReadOnly} />
+            <FormField label="Address Line 1" value={poData.billTo?.addressLine1} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField label="City" value={poData.billTo?.city} readOnly={isReadOnly} />
+            <FormField label="State / Region" value={poData.billTo?.state} readOnly={isReadOnly} />
+            <FormField label="Country" value={poData.billTo?.country} readOnly={isReadOnly} />
           </div>
         </AccordionSection>
 
         <AccordionSection title="Deliver To Details" accentColor="bg-purple-600" isOpenDefault={false}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <FormField label="Deliver To Email" value={poData.deliverTo?.email} />
-            <FormField label="GL Business Unit" value={poData.deliverTo?.glBusinessUnit} />
-            <FormField label="Asset Classification" value={poData.deliverTo?.asset} />
-            <FormField label="Location ID" value={poData.deliverTo?.locationCode?.id} isMono />
-            <FormField label="Location Name" value={poData.deliverTo?.locationCode?.name} className="md:col-span-2" />
-            <FormField label="Location Description" value={poData.deliverTo?.locationCode?.description} className="md:col-span-2" />
-            <FormField label="Physical Address" value={poData.deliverTo?.locationCode?.address} className="md:col-span-2" />
-            <FormField label="City" value={poData.deliverTo?.locationCode?.city} />
-            <FormField label="State" value={poData.deliverTo?.locationCode?.state} />
-            <FormField label="Postal Code" value={poData.deliverTo?.locationCode?.postalCode} isMono />
-            <FormField label="Region" value={poData.deliverTo?.locationCode?.region} />
-            <FormField label="Location Status" value={poData.deliverTo?.locationCode?.status} />
+            <FormField label="Deliver To Email" value={poData.deliverTo?.email} readOnly={isReadOnly} />
+            <FormField label="GL Business Unit" value={poData.deliverTo?.glBusinessUnit} readOnly={isReadOnly} />
+            <FormField label="Asset Classification" value={poData.deliverTo?.asset} readOnly={isReadOnly} />
+            <FormField label="Location ID" value={poData.deliverTo?.locationCode?.id} isMono readOnly={isReadOnly} />
+            <FormField label="Location Name" value={poData.deliverTo?.locationCode?.name} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField label="Location Description" value={poData.deliverTo?.locationCode?.description} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField label="Physical Address" value={poData.deliverTo?.locationCode?.address} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField label="City" value={poData.deliverTo?.locationCode?.city} readOnly={isReadOnly} />
+            <FormField label="State" value={poData.deliverTo?.locationCode?.state} readOnly={isReadOnly} />
+            <FormField label="Postal Code" value={poData.deliverTo?.locationCode?.postalCode} isMono readOnly={isReadOnly} />
+            <FormField label="Region" value={poData.deliverTo?.locationCode?.region} readOnly={isReadOnly} />
+            <FormField label="Location Status" value={poData.deliverTo?.locationCode?.status} readOnly={isReadOnly} />
           </div>
         </AccordionSection>
       </div>
@@ -642,20 +844,24 @@ const handlePdfUpload = async (file: File) => {
               3. Line Item Details ({lineItems.length})
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Select any row in the table below to edit its values in the form fields. Changes update the row instantly.
+              {isReadOnly
+                ? 'Line items are in read-only mode for approved purchase orders.'
+                : 'Select any row below to edit values in the form fields. Changes update the row instantly.'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleAddNewItem}
-            className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 transition-colors"
-          >
-            + Add Line Item
-          </button>
+          {!isReadOnly && (
+            <button
+              type="button"
+              onClick={handleAddNewItem}
+              className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 transition-colors cursor-pointer"
+            >
+              + Add Line Item
+            </button>
+          )}
         </div>
 
-        {/* EDIT FORM FIELDS (Positioned strictly ABOVE the Table) */}
-        {lineItems.length > 0 && selectedIdx >= 0 ? (
+        {/* EDIT FORM FIELDS (Positioned Above Table - Hidden when readOnly) */}
+        {!isReadOnly && lineItems.length > 0 && selectedIdx >= 0 ? (
           <div className="p-4 space-y-4 border bg-slate-50 border-slate-200 rounded-xl">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-bold tracking-wider uppercase text-slate-700">
@@ -756,11 +962,7 @@ const handlePdfUpload = async (file: File) => {
               </div>
             </div>
           </div>
-        ) : (
-          <div className="p-4 text-xs text-center border border-dashed bg-slate-50 border-slate-200 rounded-xl text-slate-400">
-            Upload a PDF document above or click "+ Add Line Item" to edit line item attributes.
-          </div>
-        )}
+        ) : null}
 
         {/* LINE ITEMS TABLE */}
         <div className="overflow-x-auto border rounded-lg border-slate-200">
@@ -774,7 +976,7 @@ const handlePdfUpload = async (file: File) => {
                 <th className="py-2.5 px-3 text-right">Unit Price</th>
                 <th className="py-2.5 px-3 text-right">Total</th>
                 <th className="py-2.5 px-3">Billing</th>
-                <th className="py-2.5 px-3 text-center">Delete</th>
+                {!isReadOnly && <th className="py-2.5 px-3 text-center">Delete</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -783,9 +985,11 @@ const handlePdfUpload = async (file: File) => {
                 return (
                   <tr
                     key={idx}
-                    onClick={() => setSelectedIdx(idx)}
-                    className={`cursor-pointer transition-colors ${
-                      isSelected ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : 'hover:bg-slate-50'
+                    onClick={() => !isReadOnly && setSelectedIdx(idx)}
+                    className={`transition-colors ${
+                      !isReadOnly ? 'cursor-pointer hover:bg-slate-50' : ''
+                    } ${
+                      isSelected && !isReadOnly ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : ''
                     }`}
                   >
                     <td className="px-3 py-3 font-mono font-semibold text-indigo-700">{item.partNumber}</td>
@@ -802,25 +1006,27 @@ const handlePdfUpload = async (file: File) => {
                       ${Number(item.amount).toFixed(2)}
                     </td>
                     <td className="px-3 py-3 text-slate-600">{item.billingMethod || 'Monthly'}</td>
-                    <td className="px-3 py-3 text-center">
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteRow(e, idx)}
-                        className="p-1 transition-colors rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50"
-                        title="Delete row"
-                      >
-                        <svg className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </td>
+                    {!isReadOnly && (
+                      <td className="px-3 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteRow(e, idx)}
+                          className="p-1 transition-colors rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 cursor-pointer"
+                          title="Delete row"
+                        >
+                          <svg className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
               {!lineItems.length && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-slate-400">
-                    No line items available. Upload a Customer PO PDF above or click "+ Add Line Item".
+                  <td colSpan={isReadOnly ? 7 : 8} className="py-10 text-center text-slate-400">
+                    No line items available.
                   </td>
                 </tr>
               )}
@@ -835,18 +1041,80 @@ const handlePdfUpload = async (file: File) => {
             <div>Grand Total: <span className="font-mono text-sm font-bold text-indigo-700">${grandTotal.toFixed(2)} USD</span></div>
           </div>
         )}
-
-        {/* Global Save Button */}
-        <div className="flex justify-end pt-4">
-          <button
-            type="button"
-            onClick={handleSavePo}
-            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
-          >
-            Save Customer Purchase Order
-          </button>
-        </div>
       </div>
+
+      {/* Mandatory Remarks & Justification Approval Modal */}
+      {approvalModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-lg p-6 bg-white border rounded-2xl border-slate-200 shadow-xl space-y-4">
+            <h3 className="text-sm font-bold text-slate-800">
+              {approvalModal.action === 'APPROVED' ? 'Approve Purchase Order' : 'Reject Purchase Order'}
+            </h3>
+            <p className="text-xs text-slate-500">
+              Remarks and justification are mandatory for approval actions.
+            </p>
+
+            {approvalModal.error && (
+              <div className="p-2 text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg">
+                {approvalModal.error}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="block mb-1 text-xs font-semibold text-slate-700">
+                  Remarks <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Verified and approved against Master Services Agreement"
+                  value={approvalModal.remarks}
+                  onChange={(e) =>
+                    setApprovalModal({ ...approvalModal, remarks: e.target.value, error: '' })
+                  }
+                  className="w-full px-3 py-2 text-xs border rounded-lg border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 text-xs font-semibold text-slate-700">
+                  Justification <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Budget approved under Q3 procurement allocation"
+                  value={approvalModal.justification}
+                  onChange={(e) =>
+                    setApprovalModal({ ...approvalModal, justification: e.target.value, error: '' })
+                  }
+                  className="w-full px-3 py-2 text-xs border rounded-lg border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setApprovalModal({ ...approvalModal, isOpen: false })}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApprovalActionSubmit}
+                className={`px-4 py-2 text-xs font-bold text-white rounded-lg shadow-sm cursor-pointer ${
+                  approvalModal.action === 'APPROVED'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-rose-600 hover:bg-rose-700'
+                }`}
+              >
+                Confirm {approvalModal.action === 'APPROVED' ? 'Approval' : 'Rejection'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

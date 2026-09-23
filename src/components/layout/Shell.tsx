@@ -8,8 +8,7 @@ const navGroups: NavGroup[] = [
   { title: 'Overview', items: [{ label: 'Dashboard', icon: '▦', link: '/dashboard' }] },
   { title: 'Asset Requests', items: [
     { label: 'Customer POs', icon: '📄', link: '/po' },
-    { label: 'PO Custom Import', icon: '⬇', link: '/po/customImport' },
-
+ 
     
     { label: 'Purchase Requisitions', icon: '📋', link: '/procurement/requisitions' },
     { label: 'Procurement', icon: '➕', link: '/procurement/orders/new' },
