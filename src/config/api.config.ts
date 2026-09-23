@@ -8,6 +8,7 @@ interface APIConfig {
   apiVersion: string;
   endpoints: {
     poExtract: string;
+    purchaseOrders: string;
     grnList: string;
     invoiceList: string;
   };
@@ -19,6 +20,7 @@ const config: APIConfig = {
   apiVersion: import.meta.env.VITE_API_VERSION || 'v1',
   endpoints: {
     poExtract: import.meta.env.VITE_PO_EXTRACT_ENDPOINT || '/api/v1/purchase-orders/extract-po-pdf',
+    purchaseOrders: import.meta.env.VITE_PURCHASE_ORDERS_ENDPOINT || '/api/v1/purchase-orders',
     grnList: import.meta.env.VITE_GRN_ENDPOINT || '/api/v1/goods-receipt',
     invoiceList: import.meta.env.VITE_INVOICE_ENDPOINT || '/api/v1/invoices',
   },
@@ -38,6 +40,24 @@ export const getApiUrl = (endpoint: string): string => {
  * Get PO Extract API URL
  */
 export const getPOExtractUrl = (): string => getApiUrl(config.endpoints.poExtract);
+
+/**
+ * Get Purchase Orders List API URL with pagination and sorting
+ * @param page 0-indexed page number
+ * @param size Page size limit
+ * @param sort Sort parameter string (e.g., "Id,asc")
+ */
+export const getPOListUrl = (page: number, size: number, sort: string): string => {
+  const sortParam = encodeURIComponent(JSON.stringify([sort]));
+  return `${getApiUrl(config.endpoints.purchaseOrders)}?page=${page}&size=${size}&sort=${sortParam}`;
+};
+
+/**
+ * Get Single Purchase Order API URL by ID
+ * @param id PO entity identifier
+ */
+export const getPurchaseOrderByIdUrl = (id: string | number): string =>
+  `${getApiUrl(config.endpoints.purchaseOrders)}/${id}`;
 
 /**
  * Get GRN API URL

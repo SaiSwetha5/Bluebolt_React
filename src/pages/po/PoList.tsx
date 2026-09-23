@@ -4,6 +4,17 @@ import { Search, Loader2 } from 'lucide-react';
 import { LIST_OF_PO_MOCK } from '../../mocks/LIST_OF_PO_MOCK';
 import type { PoStatus } from '../../types/models';
 
+// Self-contained API URL helpers (no external import required)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+
+const getPOListUrl = (page: number, size: number, sort: string): string => {
+  const sortParam = encodeURIComponent(JSON.stringify([sort]));
+  return `${API_BASE_URL}/api/v1/purchase-orders?page=${page}&size=${size}&sort=${sortParam}`;
+};
+
+const getPurchaseOrderByIdUrl = (id: string | number): string =>
+  `${API_BASE_URL}/api/v1/purchase-orders/${id}`;
+
 const FILTERS: ('ALL' | PoStatus)[] = [
   'ALL',
   'PENDING_APPROVAL',
@@ -17,6 +28,9 @@ export default function PoList() {
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Per-row loading state when fetching single PO details
+  const [activeLoadingId, setActiveLoadingId] = useState<string | number | null>(null);
 
   // Dynamic Pagination & Sort States
   const [currentPage, setCurrentPage] = useState(1);
@@ -35,24 +49,35 @@ export default function PoList() {
       setError(null);
 
       const apiPage = currentPage - 1;
-      const sortParam = encodeURIComponent(JSON.stringify([`${sortField},${sortDirection}`]));
-      const url = `http://localhost:8080/api/v1/purchase-orders?page=${apiPage}&size=${pageSize}&sort=${sortParam}`;
+      const requestUrl = getPOListUrl(apiPage, pageSize, `${sortField},${sortDirection}`);
 
       try {
- 
-        // const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
-        // if (!response.ok) throw new Error(`Server status: ${response.status} ${response.statusText}`);
-        // const json = await response.json();
+        let json: any;
 
-        const json = LIST_OF_PO_MOCK;
- 
-        const allContent = json?.data?.content || [];
-        const total = json?.data?.totalElements ?? allContent.length;
-        const pages = json?.data?.totalPages ?? Math.max(1, Math.ceil(total / pageSize));
+        // --- TOGGLE LINE: Comment this out to switch directly to the real API ---
+        json = LIST_OF_PO_MOCK;
+        // ------------------------------------------------------------------------
 
-        // In Mock mode, slice manually for client pagination; live API returns paginated slice directly
+        const isMockActive = Boolean(json);
+
+        if (!json) {
+          const response = await fetch(requestUrl, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+
+          if (!response.ok) {
+            throw new Error(`Server status: ${response.status} ${response.statusText}`);
+          }
+          json = await response.json();
+        }
+
+        const allContent = json?.data?.content || json?.content || [];
+        const total = json?.data?.totalElements ?? json?.totalElements ?? allContent.length;
+        const pages = json?.data?.totalPages ?? json?.totalPages ?? Math.max(1, Math.ceil(total / pageSize));
+
         const content =
-          allContent.length > pageSize
+          isMockActive && allContent.length > pageSize
             ? allContent.slice(apiPage * pageSize, apiPage * pageSize + pageSize)
             : allContent;
 
@@ -94,6 +119,34 @@ export default function PoList() {
 
     fetchPurchaseOrders();
   }, [currentPage, pageSize, sortField, sortDirection]);
+
+  // Single PO Fetch Trigger
+  const handleNavigateToCustomerIntake = async (po: any) => {
+    const targetId = po.id !== '—' ? po.id : po.poNumber;
+
+    try {
+      setActiveLoadingId(po.id);
+
+      const response = await fetch(getPurchaseOrderByIdUrl(targetId), {
+        method: 'GET',
+        headers: { accept: '*/*' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Status: ${response.status} ${response.statusText}`);
+      }
+
+      const poData = await response.json();
+      const detailedRecord = poData?.data ?? poData;
+
+      navigate('/po/customImport', { state: { poRecord: detailedRecord } });
+    } catch (err) {
+      console.warn('Direct PO fetch failed, using list state fallback:', err);
+      navigate('/po/customImport', { state: { poRecord: po } });
+    } finally {
+      setActiveLoadingId(null);
+    }
+  };
 
   // Status Filter
   const statusFiltered = useMemo(() => {
@@ -163,10 +216,6 @@ export default function PoList() {
   const handleFilterChange = (filter: 'ALL' | PoStatus) => {
     setActive(filter);
     setCurrentPage(1);
-  };
-
-  const handleNavigateToCustomerIntake = (po: any) => {
-    navigate('/po/customImport', { state: { poRecord: po } });
   };
 
   return (
@@ -281,65 +330,72 @@ export default function PoList() {
                 </tr>
               ) : (
                 <>
-                  {filtered.map((po: any) => (
-                    <tr key={po.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-3 px-4">
-                        <button
-                          type="button"
-                          onClick={() => handleNavigateToCustomerIntake(po)}
-                          className="font-mono font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer text-left"
-                        >
-                          {po.id}
-                        </button>
-                      </td>
+                  {filtered.map((po: any) => {
+                    const isRowLoading = activeLoadingId === po.id;
+                    return (
+                      <tr key={po.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-4">
+                          <button
+                            type="button"
+                            disabled={isRowLoading}
+                            onClick={() => handleNavigateToCustomerIntake(po)}
+                            className="font-mono font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer text-left inline-flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {isRowLoading && <Loader2 className="h-3 w-3 animate-spin text-indigo-600" />}
+                            <span>{po.id}</span>
+                          </button>
+                        </td>
 
-                      <td className="py-3 px-4 font-medium text-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => handleNavigateToCustomerIntake(po)}
-                          className="font-medium text-slate-800 hover:text-indigo-600 hover:underline cursor-pointer text-left"
-                        >
-                          {po.poNumber}
-                        </button>
-                      </td>
+                        <td className="py-3 px-4 font-medium text-slate-800">
+                          <button
+                            type="button"
+                            disabled={isRowLoading}
+                            onClick={() => handleNavigateToCustomerIntake(po)}
+                            className="font-medium text-slate-800 hover:text-indigo-600 hover:underline cursor-pointer text-left inline-flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {isRowLoading && <Loader2 className="h-3 w-3 animate-spin text-indigo-600" />}
+                            <span>{po.poNumber}</span>
+                          </button>
+                        </td>
 
-                      <td className="py-3 px-4 text-slate-700">{po.clientName}</td>
+                        <td className="py-3 px-4 text-slate-700">{po.clientName}</td>
 
-                      <td className="py-3 px-4 text-slate-500">{po.source}</td>
+                        <td className="py-3 px-4 text-slate-500">{po.source}</td>
 
-                      <td className="py-3 px-4 text-center font-bold text-slate-800">
-                        {po.quantity}
-                      </td>
+                        <td className="py-3 px-4 text-center font-bold text-slate-800">
+                          {po.quantity}
+                        </td>
 
-                      <td className="py-3 px-4 text-right font-mono text-slate-700">
-                        ${Number(po.unitCost || 0).toLocaleString()}
-                      </td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-700">
+                          ${Number(po.unitCost || 0).toLocaleString()}
+                        </td>
 
-                      <td className="py-3 pl-4 pr-8 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
-                        ${Number(po.totalAmount || 0).toLocaleString()}
-                      </td>
+                        <td className="py-3 pl-4 pr-8 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
+                          ${Number(po.totalAmount || 0).toLocaleString()}
+                        </td>
 
-                      <td className="py-3 pl-4 pr-4 text-left text-slate-500 whitespace-nowrap">
-                        {po.submittedAt
-                          ? new Date(po.submittedAt).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })
-                          : '—'}
-                      </td>
+                        <td className="py-3 pl-4 pr-4 text-left text-slate-500 whitespace-nowrap">
+                          {po.submittedAt
+                            ? new Date(po.submittedAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })
+                            : '—'}
+                        </td>
 
-                      <td className="py-3 pl-4 pr-6 text-left text-slate-500 whitespace-nowrap">
-                        {po.endDate
-                          ? new Date(po.endDate).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="py-3 pl-4 pr-6 text-left text-slate-500 whitespace-nowrap">
+                          {po.endDate
+                            ? new Date(po.endDate).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                              })
+                            : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
 
                   {filtered.length < 1 && (
                     <tr>
