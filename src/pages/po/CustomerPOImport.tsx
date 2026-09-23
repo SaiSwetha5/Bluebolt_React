@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useData } from '../../store/DataContext';
 import { CUSTOMER_PO_MOCK } from '../../mocks/Customer_PO_MOCK';
@@ -18,7 +18,7 @@ export const FormField: React.FC<FormFieldProps> = ({
   label,
   value,
   placeholder = '—',
-  readOnly = true,
+  readOnly = false,
   className = '',
   isMono = false,
   onChange,
@@ -76,9 +76,13 @@ export const AccordionSection: React.FC<AccordionSectionProps> = ({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-slate-400 font-medium">{isOpen ? 'Hide Details' : 'View Details'}</span>
+          <span className="text-[11px] text-slate-400 font-medium">
+            {isOpen ? 'Hide Details' : 'View Details'}
+          </span>
           <svg
-            className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+            className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
+              isOpen ? 'rotate-180' : ''
+            }`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -118,6 +122,17 @@ interface UploadDebugState {
   errorMessage?: string;
 }
 
+const emptyFormState: Partial<LineItem> = {
+  partNumber: '',
+  catalogMatch: '',
+  entityName: '',
+  entityCode: '',
+  quantity: 1,
+  unitPrice: 0,
+  amount: 0,
+  billingMethod: 'Monthly',
+};
+
 export default function CustomerPOImport() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -125,21 +140,22 @@ export default function CustomerPOImport() {
 
   const { intakePO, updatePO, catalog = [] } = dataContext || {};
 
-  // Retrieve incoming PO record passed directly from the selected row in PoList
   const passedRecord = (location.state as any)?.poRecord;
   const isExistingPO = Boolean(passedRecord);
 
   const [poStatus, setPoStatus] = useState<string>('RECEIVED');
-
-  // Business Rules for Editability
   const isApproved = poStatus === 'APPROVED';
   const isRejected = poStatus === 'REJECTED';
-  const isReadOnly = isApproved;
+  const isReadOnly = false;
 
   const [poFile, setPoFile] = useState<File | null>(null);
-  const [, setAdditionalFiles] = useState<FileList | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [isParsed, setIsParsed] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [showParseSuccess, setShowParseSuccess] = useState(false);
+
+  const toastTimerRef = useRef<number | null>(null);
+
   const [uploadDebug, setUploadDebug] = useState<UploadDebugState>({
     phase: 'idle',
     requestUrl: '',
@@ -147,7 +163,6 @@ export default function CustomerPOImport() {
     startedAt: '',
   });
 
-  // Approval Modal State
   const [approvalModal, setApprovalModal] = useState<{
     isOpen: boolean;
     action: 'APPROVED' | 'REJECTED';
@@ -185,32 +200,31 @@ export default function CustomerPOImport() {
 
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number>(-1);
+  const [editForm, setEditForm] = useState<Partial<LineItem>>(emptyFormState);
 
-  const [editForm, setEditForm] = useState<Partial<LineItem>>({
-    partNumber: '',
-    catalogMatch: '',
-    entityName: '',
-    entityCode: '',
-    quantity: 1,
-    unitPrice: 0,
-    amount: 0,
-    billingMethod: 'Monthly',
-  });
+  // Clear toast timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   // Prefill the form whenever a row is passed via state
   useEffect(() => {
     if (passedRecord) {
       setPoStatus(passedRecord.status || 'RECEIVED');
       setPoData({
-        orderNo: passedRecord.poNumber || '',
-        customerName: passedRecord.clientName || '',
+        orderNo: passedRecord.poNumber || passedRecord.orderNo || '',
+        customerName: passedRecord.clientName || passedRecord.customerName || passedRecord.supplier?.name || '',
         contractId: passedRecord.contractId || '',
         revision: passedRecord.revision || '',
-        issuedOn: passedRecord.issuedOn || '',
+        issuedOn: passedRecord.issuedOn || passedRecord.submittedAt || '',
         createdOn: passedRecord.createdOn || passedRecord.submittedAt || '',
         createdBy: passedRecord.createdBy || '',
         requester: passedRecord.requester || '',
-        poEndDate: passedRecord.poEndDate || '',
+        poEndDate: passedRecord.poEndDate || passedRecord.endDate || '',
         totalAmount: passedRecord.totalAmount || 0,
         currency: passedRecord.currency || 'USD',
         intakeStatus: passedRecord.status || 'RECEIVED',
@@ -223,24 +237,40 @@ export default function CustomerPOImport() {
       });
 
       if (passedRecord.lineItems && passedRecord.lineItems.length > 0) {
-        setLineItems(passedRecord.lineItems);
+        const mappedItems: LineItem[] = passedRecord.lineItems.map((li: any, idx: number) => ({
+          lineNo: li.lineNo || idx + 1,
+          description: li.description || 'Equipment / Line Item',
+          fullDescription: li.fullDescription || li.description,
+          partNumber: li.partNumber || 'FN4FC',
+          catalogMatch: li.catalogMatch || li.partNumber || 'FN4FC',
+          entityName: li.entityName || passedRecord.clientName || '',
+          entityCode: li.entityCode || '',
+          quantity: Number(li.quantity) || 1,
+          uom: li.uom || 'each',
+          unitPrice: Number(li.unitPrice) || 0,
+          netAmount: (Number(li.quantity) || 1) * (Number(li.unitPrice) || 0),
+          amount: Number(li.amount) || (Number(li.quantity) || 1) * (Number(li.unitPrice) || 0),
+          billingMethod: li.billingMethod || 'Monthly',
+        }));
+        setLineItems(mappedItems);
         setSelectedIdx(0);
       } else {
-        setLineItems([
-          {
-            lineNo: 1,
-            description: 'Item Details',
-            partNumber: passedRecord.partNumber || 'FN4FC',
-            catalogMatch: passedRecord.catalogItemId || passedRecord.partNumber || 'FN4FC',
-            entityName: passedRecord.clientName || '',
-            entityCode: '',
-            quantity: passedRecord.quantity || 1,
-            unitPrice: passedRecord.unitCost || 0,
-            netAmount: (passedRecord.quantity || 1) * (passedRecord.unitCost || 0),
-            amount: passedRecord.totalAmount || (passedRecord.quantity || 1) * (passedRecord.unitCost || 0),
-            billingMethod: 'Monthly',
-          },
-        ]);
+        const defaultItem: LineItem = {
+          lineNo: 1,
+          description: 'Item Details',
+          partNumber: passedRecord.partNumber || 'SP-DIPC CS',
+          catalogMatch: passedRecord.catalogItemId || passedRecord.partNumber || 'SP-DIPC CS',
+          entityName: passedRecord.clientName || '',
+          entityCode: '',
+          quantity: Number(passedRecord.quantity) || 1,
+          unitPrice: Number(passedRecord.unitCost) || 0,
+          netAmount: (Number(passedRecord.quantity) || 1) * (Number(passedRecord.unitCost) || 0),
+          amount:
+            Number(passedRecord.totalAmount) ||
+            (Number(passedRecord.quantity) || 1) * (Number(passedRecord.unitCost) || 0),
+          billingMethod: 'Monthly',
+        };
+        setLineItems([defaultItem]);
         setSelectedIdx(0);
       }
       setIsParsed(true);
@@ -252,7 +282,11 @@ export default function CustomerPOImport() {
     const startedAt = new Date().toLocaleTimeString();
 
     setPoFile(file);
+    setIsParsed(false);
     setIsParsing(true);
+    setShowParseSuccess(false);
+    setUploadProgress(10);
+
     setUploadDebug({
       phase: 'starting',
       requestUrl,
@@ -260,8 +294,37 @@ export default function CustomerPOImport() {
       startedAt,
     });
 
+    // Reset previous PO
+    setPoData({
+      orderNo: '',
+      customerName: '',
+      contractId: '',
+      revision: '',
+      issuedOn: '',
+      createdOn: '',
+      createdBy: '',
+      requester: '',
+      poEndDate: '',
+      totalAmount: 0,
+      currency: 'USD',
+      intakeStatus: 'PARSING',
+      shipment: '',
+      supplier: null,
+      shipTo: null,
+      billTo: null,
+      deliverTo: null,
+      approvalHistory: [],
+    });
+    setLineItems([]);
+    setSelectedIdx(-1);
+
+    // Simulate steady progress while parsing
+    const progressInterval = setInterval(() => {
+      setUploadProgress((prev) => (prev < 90 ? prev + 15 : prev));
+    }, 250);
+
     try {
-      let extractedData: any = CUSTOMER_PO_MOCK.data;
+      let extractedData: any = CUSTOMER_PO_MOCK?.data;
 
       if (!extractedData) {
         const formData = new FormData();
@@ -280,7 +343,13 @@ export default function CustomerPOImport() {
 
         const json = await response.json();
         extractedData = json.data ?? json;
+      } else {
+        // Mock delay simulation
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
 
       setUploadDebug((prev) => ({
         ...prev,
@@ -330,19 +399,34 @@ export default function CustomerPOImport() {
         setSelectedIdx(0);
       }
       setIsParsed(true);
+
+      // Trigger success notification toast
+      setShowParseSuccess(true);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => {
+        setShowParseSuccess(false);
+      }, 3500);
     } catch (error) {
+      clearInterval(progressInterval);
+      setUploadProgress(0);
       setUploadDebug((prev) => ({
         ...prev,
         phase: 'error',
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
       }));
+      setIsParsed(false);
+      alert('Unable to parse the purchase order.');
     } finally {
-      setIsParsing(false);
+      clearInterval(progressInterval);
+      setTimeout(() => {
+        setIsParsing(false);
+        setUploadProgress(0);
+      }, 400);
     }
   };
 
   useEffect(() => {
-    if (lineItems.length > 0 && selectedIdx >= 0 && selectedIdx < lineItems.length) {
+    if (selectedIdx >= 0 && selectedIdx < lineItems.length) {
       const active = lineItems[selectedIdx];
       setEditForm({
         partNumber: active.partNumber,
@@ -364,25 +448,6 @@ export default function CustomerPOImport() {
   }, [lineItems]);
 
   const handleEditChange = (field: keyof LineItem, val: any) => {
-    if (isReadOnly || selectedIdx < 0 || selectedIdx >= lineItems.length) return;
-
-    setLineItems((prev) => {
-      const updated = [...prev];
-      const current = { ...updated[selectedIdx], [field]: val };
-
-      if (field === 'quantity' || field === 'unitPrice') {
-        const qty = field === 'quantity' ? Number(val) || 0 : Number(current.quantity) || 0;
-        const price = field === 'unitPrice' ? Number(val) || 0 : Number(current.unitPrice) || 0;
-        current.quantity = qty;
-        current.unitPrice = price;
-        current.amount = qty * price;
-        current.netAmount = qty * price;
-      }
-
-      updated[selectedIdx] = current;
-      return updated;
-    });
-
     setEditForm((prev) => {
       const next = { ...prev, [field]: val };
       if (field === 'quantity' || field === 'unitPrice') {
@@ -394,43 +459,123 @@ export default function CustomerPOImport() {
     });
   };
 
-  const handleAddNewItem = () => {
-    if (isReadOnly) return;
-    const newItem: LineItem = {
-      lineNo: lineItems.length + 1,
-      description: 'Peripheral / Equipment Bundle',
-      partNumber: 'FN4FC',
-      catalogMatch: 'FN4FC',
+  const handleStartAddNewItem = () => {
+    setSelectedIdx(-1);
+    setEditForm({
+      ...emptyFormState,
       entityName: poData.billTo?.name || '',
       entityCode: poData.deliverTo?.locationCode?.id || '',
-      quantity: 1,
-      unitPrice: 230,
-      netAmount: 230,
-      amount: 230,
-      billingMethod: 'Monthly',
+    });
+  };
+
+  const handleConfirmAddItem = () => {
+    if (!editForm.partNumber?.trim()) {
+      alert('Please provide a Part Number before adding a line item.');
+      return;
+    }
+
+    const qty = Number(editForm.quantity) || 1;
+    const price = Number(editForm.unitPrice) || 0;
+
+    const newItem: LineItem = {
+      lineNo: lineItems.length + 1,
+      description: editForm.description || 'Equipment / Peripheral',
+      partNumber: editForm.partNumber.trim(),
+      catalogMatch: editForm.catalogMatch || editForm.partNumber.trim(),
+      entityName: editForm.entityName || poData.billTo?.name || '',
+      entityCode: editForm.entityCode || poData.deliverTo?.locationCode?.id || '',
+      quantity: qty,
+      unitPrice: price,
+      netAmount: qty * price,
+      amount: qty * price,
+      billingMethod: editForm.billingMethod || 'Monthly',
     };
+
     const updated = [...lineItems, newItem];
     setLineItems(updated);
     setSelectedIdx(updated.length - 1);
   };
 
+  const handleUpdateLineItem = () => {
+    if (selectedIdx < 0 || selectedIdx >= lineItems.length) {
+      alert('Please select a line item from the table first to update it.');
+      return;
+    }
+    if (!editForm.partNumber?.trim()) {
+      alert('Part Number cannot be empty.');
+      return;
+    }
+
+    const qty = Number(editForm.quantity) || 0;
+    const price = Number(editForm.unitPrice) || 0;
+
+    setLineItems((prev) => {
+      const updated = [...prev];
+      updated[selectedIdx] = {
+        ...updated[selectedIdx],
+        ...editForm,
+        partNumber: editForm.partNumber!.trim(),
+        quantity: qty,
+        unitPrice: price,
+        amount: qty * price,
+        netAmount: qty * price,
+      };
+      return updated;
+    });
+  };
+
   const handleDeleteRow = (e: React.MouseEvent, indexToDelete: number) => {
     e.stopPropagation();
-    if (isReadOnly) return;
     if (lineItems.length === 1) {
       alert('A purchase order requires at least one line item.');
       return;
     }
     const updated = lineItems.filter((_, idx) => idx !== indexToDelete);
     setLineItems(updated);
-    if (selectedIdx >= updated.length) {
-      setSelectedIdx(updated.length - 1);
+    if (selectedIdx === indexToDelete) {
+      handleStartAddNewItem();
+    } else if (selectedIdx > indexToDelete) {
+      setSelectedIdx((prev) => prev - 1);
     }
   };
 
-  const handleSaveOrResubmit = (isResubmission = false) => {
-    if (!isParsed && lineItems.length === 0) {
-      alert('Please upload a PO PDF or configure line items before saving.');
+  const handleAddNewPO = () => {
+    setSelectedIdx(-1);
+    setPoFile(null);
+    setIsParsed(false);
+    setPoStatus('RECEIVED');
+    setLineItems([]);
+    setEditForm(emptyFormState);
+    setPoData({
+      orderNo: '',
+      customerName: '',
+      contractId: '',
+      revision: '',
+      issuedOn: new Date().toISOString().split('T')[0],
+      createdOn: new Date().toISOString().split('T')[0],
+      createdBy: '',
+      requester: '',
+      poEndDate: '',
+      totalAmount: 0,
+      currency: 'USD',
+      intakeStatus: 'RECEIVED',
+      shipment: 'Air Freight',
+      supplier: null,
+      shipTo: null,
+      billTo: null,
+      deliverTo: null,
+      approvalHistory: [],
+    });
+  };
+
+  const handleSaveOrUpdate = (isResubmission = false) => {
+    if (!poData.orderNo?.trim()) {
+      alert('Please enter a PO Order Number before saving.');
+      return;
+    }
+
+    if (lineItems.length === 0) {
+      alert('Please add at least one line item before saving.');
       return;
     }
 
@@ -438,9 +583,17 @@ export default function CustomerPOImport() {
     const averageUnitCost = totalUnits > 0 ? Math.round((grandTotal / totalUnits) * 100) / 100 : 0;
     const currentId = passedRecord?.id || `CPO-${Math.floor(100000 + Math.random() * 900000)}`;
 
-    const city = poData.deliverTo?.locationCode?.city || poData.billTo?.city || poData.shipTo?.city || 'La Defense';
+    const city =
+      poData.deliverTo?.locationCode?.city ||
+      poData.billTo?.city ||
+      poData.shipTo?.city ||
+      'La Defense';
     const state = poData.deliverTo?.locationCode?.state || poData.billTo?.state || 'PA';
-    const country = poData.deliverTo?.locationCode?.region || poData.billTo?.country || poData.shipTo?.country || 'France';
+    const country =
+      poData.deliverTo?.locationCode?.region ||
+      poData.billTo?.country ||
+      poData.shipTo?.country ||
+      'France';
 
     const matchedCatalogItem = catalog.find((c: any) =>
       lineItems.some(
@@ -453,11 +606,11 @@ export default function CustomerPOImport() {
     const unifiedPoRecord = {
       ...(passedRecord || {}),
       id: currentId,
-      poNumber: poData.orderNo || `PO-${Date.now().toString().slice(-6)}`,
+      poNumber: poData.orderNo.trim(),
       clientName: poData.customerName || poData.billTo?.company || 'Cognizant Internal',
       partNumber: firstItem.partNumber || 'FN4FC',
       catalogItemId: matchedCatalogItem?.id || 'CAT-14STD',
-      source: passedRecord?.source || (poFile ? 'PDF_IMPORT' : 'API'),
+      source: passedRecord?.source || (poFile ? 'PDF_IMPORT' : 'MANUAL_ENTRY'),
       quantity: totalUnits,
       unitCost: averageUnitCost,
       totalAmount: grandTotal,
@@ -473,7 +626,7 @@ export default function CustomerPOImport() {
       lineItems,
     };
 
-    if (passedRecord && typeof updatePO === 'function') {
+    if (isExistingPO && typeof updatePO === 'function') {
       updatePO(unifiedPoRecord);
     } else if (typeof intakePO === 'function') {
       intakePO(unifiedPoRecord);
@@ -482,128 +635,113 @@ export default function CustomerPOImport() {
     navigate('/po');
   };
 
-  const handleApprovalActionSubmit = () => {
-    if (!approvalModal.remarks.trim() || !approvalModal.justification.trim()) {
-      setApprovalModal((prev) => ({
-        ...prev,
-        error: 'Both Remarks and Justification are mandatory for approval actions.',
-      }));
-      return;
-    }
-
-    const nextStatus = approvalModal.action;
-    const historyEntry = {
-      action: nextStatus,
-      remarks: approvalModal.remarks.trim(),
-      justification: approvalModal.justification.trim(),
-      timestamp: new Date().toISOString(),
-      actionBy: 'Approver',
-    };
-
-    const updatedPo = {
-      ...(passedRecord || {}),
-      ...poData,
-      status: nextStatus,
-      approvalHistory: [...(poData.approvalHistory || []), historyEntry],
-      lineItems,
-      totalAmount: grandTotal,
-      quantity: totalUnits,
-    };
-
-    if (typeof updatePO === 'function') {
-      updatePO(updatedPo);
-    } else if (typeof intakePO === 'function') {
-      intakePO(updatedPo);
-    }
-
-    setPoStatus(nextStatus);
-    setApprovalModal({ isOpen: false, action: 'APPROVED', remarks: '', justification: '', error: '' });
-  };
-
   return (
-    <div className="pb-20 mx-auto space-y-6 max-w-7xl">
-      {/* Top Banner & Status Controls */}
+    <div className="pb-20 mx-auto space-y-6 max-w-7xl relative">
+      {/* ==================================================== */}
+      {/* PDF PARSE SUCCESS TOAST                              */}
+      {/* ==================================================== */}
+      {showParseSuccess && (
+        <div
+          className="fixed top-5 right-5 z-[100000] flex items-center gap-3 min-w-[320px] px-4 py-3 bg-white border border-emerald-200 rounded-xl shadow-xl transition-all animate-bounce-short"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-100 text-emerald-600 flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-bold text-slate-800">
+              Purchase Order details extracted successfully.
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              PO Parsed Successfully.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowParseSuccess(false)}
+            className="p-1 text-slate-400 rounded hover:text-slate-600 hover:bg-slate-100 transition-colors"
+            aria-label="Close notification"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* FULL-SCREEN PARSING OVERLAY & PROGRESS BAR           */}
+      {/* ==================================================== */}
+      {isParsing && (
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-900/20 backdrop-blur-[5px] cursor-wait"
+          role="status"
+          aria-live="polite"
+          aria-label="Parsing purchase order"
+        >
+          <div className="flex flex-col items-center justify-center min-w-[320px] max-w-sm px-8 py-7 bg-white/95 border border-white/80 shadow-2xl rounded-2xl">
+            <div className="w-12 h-12 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin" />
+            
+            <p className="mt-4 text-sm font-bold text-slate-800 text-center">
+              Processing Purchase Order
+            </p>
+            <p className="mt-1 text-xs font-medium text-slate-500 text-center">
+              Uploading & extracting PO data...
+            </p>
+
+            {/* Upload Progress Bar */}
+            <div className="w-full mt-5">
+              <div className="flex justify-between items-center text-[11px] font-semibold text-slate-600 mb-1.5">
+                <span>Progress</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
+                <div
+                  className="bg-indigo-600 h-full rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+
+                 <p className="mt-5 text-sm font-bold text-slate-800">
+              Please wait while we are processing your request.
+            </p>
+ 
+            <p className="mt-1 text-xs font-medium text-slate-500">
+              Extracting PO data...
+            </p>
+ 
+            <p className="mt-3 text-[10px] text-slate-400">
+              This may take a few moments.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Top Banner & Header Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-white border border-slate-200 rounded-xl shadow-sm">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-bold text-slate-800">
-              {isExistingPO ? `Customer PO: ${passedRecord?.poNumber || passedRecord?.id}` : 'Customer PO Intake & Edit'}
+              {isExistingPO
+                ? `Customer PO: ${passedRecord?.poNumber || passedRecord?.id}`
+                : 'Customer PO Intake & Edit'}
             </h1>
-            <span
-              className={`px-3 py-1 text-xs font-bold rounded-full border ${
-                poStatus === 'APPROVED'
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : poStatus === 'REJECTED'
-                  ? 'bg-rose-50 text-rose-700 border-rose-200'
-                  : poStatus === 'PENDING_APPROVAL'
-                  ? 'bg-amber-50 text-amber-700 border-amber-200'
-                  : 'bg-blue-50 text-blue-700 border-blue-200'
-              }`}
-            >
-              Approval Status: {poStatus.replace(/_/g, ' ')}
-            </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
             {isApproved
-              ? 'This purchase order has been APPROVED and is locked in read-only mode.'
+              ? 'This purchase order has been APPROVED. You can view, add, update, and save changes.'
               : isRejected
               ? 'This purchase order was REJECTED. You can edit line items and resubmit for approval.'
-              : 'Unified view and editing screen for Customer Purchase Orders.'}
+              : 'Add new items, update details, and save your Purchase Order.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => navigate('/po')}
-            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-          >
-            Back to PO Listing
-          </button>
-
-          {!isApproved && !isRejected && isExistingPO && (
-            <>
-              <button
-                type="button"
-                onClick={() =>
-                  setApprovalModal({ isOpen: true, action: 'APPROVED', remarks: '', justification: '', error: '' })
-                }
-                className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm cursor-pointer"
-              >
-                Approve PO
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setApprovalModal({ isOpen: true, action: 'REJECTED', remarks: '', justification: '', error: '' })
-                }
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm cursor-pointer"
-              >
-                Reject PO
-              </button>
-            </>
-          )}
-
-          {isRejected && (
-            <button
-              type="button"
-              onClick={() => handleSaveOrResubmit(true)}
-              className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm cursor-pointer"
-            >
-              Resubmit for Approval
-            </button>
-          )}
-
-          {!isApproved && !isRejected && (
-            <button
-              type="button"
-              onClick={() => handleSaveOrResubmit(false)}
-              className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-sm cursor-pointer"
-            >
-              {isExistingPO ? 'Save Changes' : 'Save Customer Purchase Order'}
-            </button>
-          )}
-        </div>
+        {/* Global PO Action Buttons */}
+      
       </div>
 
       {/* 0. Top Upload Section (Only visible during new intake) */}
@@ -627,7 +765,11 @@ export default function CustomerPOImport() {
                   }}
                 />
               </label>
-              {isParsing && <span className="text-xs font-medium text-indigo-600 animate-pulse">Extracting data...</span>}
+              {isParsing && (
+                <span className="text-xs font-medium text-indigo-600 animate-pulse">
+                  Extracting data...
+                </span>
+              )}
             </div>
             <p className="mt-2 text-xs font-medium text-slate-500">
               Attached:{' '}
@@ -638,7 +780,9 @@ export default function CustomerPOImport() {
             {uploadDebug.phase !== 'idle' && (
               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-semibold uppercase tracking-wider text-slate-500">Request Debug</span>
+                  <span className="font-semibold uppercase tracking-wider text-slate-500">
+                    Request Debug
+                  </span>
                   <span className="font-semibold text-slate-700">{uploadDebug.phase}</span>
                 </div>
                 <div className="mt-2 space-y-1">
@@ -654,7 +798,9 @@ export default function CustomerPOImport() {
                   <div>
                     HTTP Status:{' '}
                     <span className="font-medium text-slate-800">
-                      {uploadDebug.responseStatus ? `${uploadDebug.responseStatus} ${uploadDebug.responseStatusText || ''}` : 'No response yet'}
+                      {uploadDebug.responseStatus
+                        ? `${uploadDebug.responseStatus} ${uploadDebug.responseStatusText || ''}`
+                        : 'No response yet'}
                     </span>
                   </div>
                   {uploadDebug.errorMessage && (
@@ -669,13 +815,14 @@ export default function CustomerPOImport() {
 
           <div className="p-5 bg-white border shadow-sm border-slate-200 rounded-xl">
             <h2 className="text-sm font-bold text-slate-800">Upload Additional Files</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Attach supporting documentation (.xlsx, .doc, .msg, .pdf).</p>
+            <p className="text-xs text-slate-500 mt-0.5">Attach supporting documentation (.msg).</p>
             <div className="flex items-center gap-2 mt-3">
               <input
                 type="file"
+                disabled={true}
+                accept=".msg"
                 multiple
-                className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-500 cursor-not-allowed"
-                onChange={(e) => setAdditionalFiles(e.target.files)}
+                className="text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-slate-200 file:text-slate-400 cursor-not-allowed opacity-60"
               />
             </div>
           </div>
@@ -689,9 +836,13 @@ export default function CustomerPOImport() {
             <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
             <h3 className="text-xs font-bold tracking-wider uppercase text-slate-700">1. PO Header Details</h3>
           </div>
-          <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
-            isApproved ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'
-          }`}>
+          <span
+            className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full border ${
+              isApproved
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-slate-100 text-slate-500 border-slate-200'
+            }`}
+          >
             Status: {poStatus}
           </span>
         </div>
@@ -790,28 +941,58 @@ export default function CustomerPOImport() {
             <FormField label="Contact Phone" value={poData.supplier?.phone} readOnly={isReadOnly} />
             <FormField label="Contact Email" value={poData.supplier?.contactEmail} readOnly={isReadOnly} />
             <FormField label="Postal Code" value={poData.supplier?.postalCode} isMono readOnly={isReadOnly} />
-            <FormField label="Address Line 1" value={poData.supplier?.addressLine1} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField
+              label="Address Line 1"
+              value={poData.supplier?.addressLine1}
+              className="md:col-span-2"
+              readOnly={isReadOnly}
+            />
             <FormField label="City" value={poData.supplier?.city} readOnly={isReadOnly} />
             <FormField label="Country" value={poData.supplier?.country} readOnly={isReadOnly} />
-            <FormField label="Ordering Address" value={poData.supplier?.orderingAddress} className="md:col-span-4" readOnly={isReadOnly} />
+            <FormField
+              label="Ordering Address"
+              value={poData.supplier?.orderingAddress}
+              className="md:col-span-4"
+              readOnly={isReadOnly}
+            />
           </div>
         </AccordionSection>
 
         <AccordionSection title="Ship To Address" accentColor="bg-indigo-600" isOpenDefault={false}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-            <FormField label="Facility / Attention" value={poData.shipTo?.name} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField
+              label="Facility / Attention"
+              value={poData.shipTo?.name}
+              className="md:col-span-2"
+              readOnly={isReadOnly}
+            />
             <FormField label="City" value={poData.shipTo?.city} readOnly={isReadOnly} />
             <FormField label="Country" value={poData.shipTo?.country} readOnly={isReadOnly} />
-            <FormField label="Address Line 1" value={poData.shipTo?.addressLine1} className="md:col-span-4" readOnly={isReadOnly} />
+            <FormField
+              label="Address Line 1"
+              value={poData.shipTo?.addressLine1}
+              className="md:col-span-4"
+              readOnly={isReadOnly}
+            />
           </div>
         </AccordionSection>
 
         <AccordionSection title="Bill To Address & Entity" accentColor="bg-emerald-600" isOpenDefault={false}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
             <FormField label="Billing Entity / Contact" value={poData.billTo?.name} readOnly={isReadOnly} />
-            <FormField label="Company Name" value={poData.billTo?.company} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField
+              label="Company Name"
+              value={poData.billTo?.company}
+              className="md:col-span-2"
+              readOnly={isReadOnly}
+            />
             <FormField label="Postal / ZIP Code" value={poData.billTo?.postalCode} isMono readOnly={isReadOnly} />
-            <FormField label="Address Line 1" value={poData.billTo?.addressLine1} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField
+              label="Address Line 1"
+              value={poData.billTo?.addressLine1}
+              className="md:col-span-2"
+              readOnly={isReadOnly}
+            />
             <FormField label="City" value={poData.billTo?.city} readOnly={isReadOnly} />
             <FormField label="State / Region" value={poData.billTo?.state} readOnly={isReadOnly} />
             <FormField label="Country" value={poData.billTo?.country} readOnly={isReadOnly} />
@@ -824,12 +1005,32 @@ export default function CustomerPOImport() {
             <FormField label="GL Business Unit" value={poData.deliverTo?.glBusinessUnit} readOnly={isReadOnly} />
             <FormField label="Asset Classification" value={poData.deliverTo?.asset} readOnly={isReadOnly} />
             <FormField label="Location ID" value={poData.deliverTo?.locationCode?.id} isMono readOnly={isReadOnly} />
-            <FormField label="Location Name" value={poData.deliverTo?.locationCode?.name} className="md:col-span-2" readOnly={isReadOnly} />
-            <FormField label="Location Description" value={poData.deliverTo?.locationCode?.description} className="md:col-span-2" readOnly={isReadOnly} />
-            <FormField label="Physical Address" value={poData.deliverTo?.locationCode?.address} className="md:col-span-2" readOnly={isReadOnly} />
+            <FormField
+              label="Location Name"
+              value={poData.deliverTo?.locationCode?.name}
+              className="md:col-span-2"
+              readOnly={isReadOnly}
+            />
+            <FormField
+              label="Location Description"
+              value={poData.deliverTo?.locationCode?.description}
+              className="md:col-span-2"
+              readOnly={isReadOnly}
+            />
+            <FormField
+              label="Physical Address"
+              value={poData.deliverTo?.locationCode?.address}
+              className="md:col-span-2"
+              readOnly={isReadOnly}
+            />
             <FormField label="City" value={poData.deliverTo?.locationCode?.city} readOnly={isReadOnly} />
             <FormField label="State" value={poData.deliverTo?.locationCode?.state} readOnly={isReadOnly} />
-            <FormField label="Postal Code" value={poData.deliverTo?.locationCode?.postalCode} isMono readOnly={isReadOnly} />
+            <FormField
+              label="Postal Code"
+              value={poData.deliverTo?.locationCode?.postalCode}
+              isMono
+              readOnly={isReadOnly}
+            />
             <FormField label="Region" value={poData.deliverTo?.locationCode?.region} readOnly={isReadOnly} />
             <FormField label="Location Status" value={poData.deliverTo?.locationCode?.status} readOnly={isReadOnly} />
           </div>
@@ -844,127 +1045,167 @@ export default function CustomerPOImport() {
               3. Line Item Details ({lineItems.length})
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              {isReadOnly
-                ? 'Line items are in read-only mode for approved purchase orders.'
-                : 'Select any row below to edit values in the form fields. Changes update the row instantly.'}
+              Select any row to populate and update it, or click "+ New Line Item" to enter and add new details.
             </p>
           </div>
-          {!isReadOnly && (
+         
+        </div>
+
+        {/* Line Item Form Editor */}
+        <div className="p-4 space-y-4 border bg-slate-50 border-slate-200 rounded-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-bold tracking-wider uppercase text-slate-700">
+                {selectedIdx >= 0 ? (
+                  <>
+                    Editing Row #{selectedIdx + 1}:{' '}
+                    <span className="font-mono text-indigo-600">{lineItems[selectedIdx]?.partNumber}</span>
+                  </>
+                ) : (
+                  <span className="text-emerald-700">Adding New Line Item</span>
+                )}
+              </h4>
+              <span className="text-[11px] text-slate-500">
+                {selectedIdx >= 0
+                  ? 'Row data loaded. Change fields and click "Update Line Item".'
+                  : 'Fill in the details below and click "Add Line Item" to insert.'}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 text-xs md:grid-cols-4">
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">
+                Part Number <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. FN4FC"
+                value={editForm.partNumber || ''}
+                onChange={(e) => handleEditChange('partNumber', e.target.value)}
+                className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">Catalog Part</label>
+              <select
+                value={editForm.catalogMatch || ''}
+                onChange={(e) => handleEditChange('catalogMatch', e.target.value)}
+                className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              >
+                <option value="">-- Select Catalog Match --</option>
+                <option value="FN4FC">FN4FC - Dell Networking Cable QSFP28</option>
+                <option value="C2ZK6EC">C2ZK6EC - HP EliteBook X Flip G2i AI</option>
+                <option value="APP-MBP16">APP-MBP16 - Apple MacBook Pro 16 M3</option>
+                <option value="LEN-T14">LEN-T14 - Lenovo ThinkPad T14 Gen 4</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">Entity Name</label>
+              <input
+                type="text"
+                placeholder="Entity Name"
+                value={editForm.entityName || ''}
+                onChange={(e) => handleEditChange('entityName', e.target.value)}
+                className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">Entity Code</label>
+              <input
+                type="text"
+                placeholder="Location / Org Code"
+                value={editForm.entityCode || ''}
+                onChange={(e) => handleEditChange('entityCode', e.target.value)}
+                className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">Units</label>
+              <input
+                type="number"
+                min="1"
+                value={editForm.quantity || ''}
+                onChange={(e) => handleEditChange('quantity', e.target.value)}
+                className="w-full px-3 py-2 font-bold bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">Unit Price (USD)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={editForm.unitPrice ?? ''}
+                onChange={(e) => handleEditChange('unitPrice', e.target.value)}
+                className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">Total Cost</label>
+              <input
+                readOnly
+                value={`$${Number(editForm.amount || 0).toFixed(2)}`}
+                className="w-full px-3 py-2 font-mono font-bold border rounded-md bg-slate-100 border-slate-200 text-slate-700"
+              />
+            </div>
+
+            <div>
+              <label className="block mb-1 font-semibold text-slate-600">Billing Method</label>
+              <select
+                value={editForm.billingMethod || 'Monthly'}
+                onChange={(e) => handleEditChange('billingMethod', e.target.value)}
+                className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              >
+                <option value="Monthly">Monthly</option>
+                <option value="Quarterly">Quarterly</option>
+                <option value="Annually">Annually</option>
+                <option value="One-Time">One-Time</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex w-full items-center justify-end gap-2 pt-2">
+            {selectedIdx >= 0 && (
+              <button
+                type="button"
+                onClick={handleStartAddNewItem}
+                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-600 text-xs font-medium rounded-lg border border-slate-300 transition-colors cursor-pointer"
+              >
+                Cancel Edit
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={handleAddNewItem}
-              className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-md border border-slate-300 transition-colors cursor-pointer"
+              onClick={handleConfirmAddItem}
+              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
             >
               + Add Line Item
             </button>
-          )}
+
+            <button
+              type="button"
+              onClick={handleUpdateLineItem}
+              disabled={selectedIdx < 0}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg shadow-sm transition-colors ${
+                selectedIdx >= 0
+                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-200'
+              }`}
+            >
+              Update Line Item
+            </button>
+          </div>
         </div>
 
-        {/* EDIT FORM FIELDS (Positioned Above Table - Hidden when readOnly) */}
-        {!isReadOnly && lineItems.length > 0 && selectedIdx >= 0 ? (
-          <div className="p-4 space-y-4 border bg-slate-50 border-slate-200 rounded-xl">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold tracking-wider uppercase text-slate-700">
-                Edit Selected Line Item (Row #{selectedIdx + 1}: <span className="font-mono text-indigo-600">{lineItems[selectedIdx]?.partNumber}</span>)
-              </h4>
-              <span className="text-[11px] text-emerald-600 font-semibold">Changes Apply Instantly to Row</span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 text-xs md:grid-cols-4">
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Part Number</label>
-                <input
-                  type="text"
-                  value={editForm.partNumber || ''}
-                  onChange={(e) => handleEditChange('partNumber', e.target.value)}
-                  className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Catalog Part</label>
-                <select
-                  value={editForm.catalogMatch || ''}
-                  onChange={(e) => handleEditChange('catalogMatch', e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                >
-                  <option value="FN4FC">FN4FC - Dell Networking Cable QSFP28</option>
-                  <option value="C2ZK6EC">C2ZK6EC - HP EliteBook X Flip G2i AI</option>
-                  <option value="APP-MBP16">APP-MBP16 - Apple MacBook Pro 16 M3</option>
-                  <option value="LEN-T14">LEN-T14 - Lenovo ThinkPad T14 Gen 4</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Entity Name</label>
-                <input
-                  type="text"
-                  value={editForm.entityName || ''}
-                  onChange={(e) => handleEditChange('entityName', e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Entity Code</label>
-                <input
-                  type="text"
-                  value={editForm.entityCode || ''}
-                  onChange={(e) => handleEditChange('entityCode', e.target.value)}
-                  className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Units</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={editForm.quantity || ''}
-                  onChange={(e) => handleEditChange('quantity', e.target.value)}
-                  className="w-full px-3 py-2 font-bold bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Unit Price (USD)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={editForm.unitPrice ?? ''}
-                  onChange={(e) => handleEditChange('unitPrice', e.target.value)}
-                  className="w-full px-3 py-2 font-mono bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Total Cost</label>
-                <input
-                  readOnly
-                  value={`$${Number(editForm.amount || 0).toFixed(2)}`}
-                  className="w-full px-3 py-2 font-mono font-bold border rounded-md bg-slate-100 border-slate-200 text-slate-700"
-                />
-              </div>
-
-              <div>
-                <label className="block mb-1 font-semibold text-slate-600">Billing Method</label>
-                <select
-                  value={editForm.billingMethod || 'Monthly'}
-                  onChange={(e) => handleEditChange('billingMethod', e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-md border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                >
-                  <option value="Monthly">Monthly</option>
-                  <option value="Quarterly">Quarterly</option>
-                  <option value="Annually">Annually</option>
-                  <option value="One-Time">One-Time</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {/* LINE ITEMS TABLE */}
+        {/* Line Items Table */}
         <div className="overflow-x-auto border rounded-lg border-slate-200">
           <table className="w-full text-xs text-left border-collapse">
             <thead>
@@ -976,7 +1217,7 @@ export default function CustomerPOImport() {
                 <th className="py-2.5 px-3 text-right">Unit Price</th>
                 <th className="py-2.5 px-3 text-right">Total</th>
                 <th className="py-2.5 px-3">Billing</th>
-                {!isReadOnly && <th className="py-2.5 px-3 text-center">Delete</th>}
+                <th className="py-2.5 px-3 text-center">Delete</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -985,11 +1226,9 @@ export default function CustomerPOImport() {
                 return (
                   <tr
                     key={idx}
-                    onClick={() => !isReadOnly && setSelectedIdx(idx)}
-                    className={`transition-colors ${
-                      !isReadOnly ? 'cursor-pointer hover:bg-slate-50' : ''
-                    } ${
-                      isSelected && !isReadOnly ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : ''
+                    onClick={() => setSelectedIdx(idx)}
+                    className={`transition-colors cursor-pointer hover:bg-slate-50 ${
+                      isSelected ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : ''
                     }`}
                   >
                     <td className="px-3 py-3 font-mono font-semibold text-indigo-700">{item.partNumber}</td>
@@ -1001,32 +1240,32 @@ export default function CustomerPOImport() {
                       <div className="text-[10px] text-slate-400 font-mono">{item.entityCode || '—'}</div>
                     </td>
                     <td className="px-3 py-3 font-bold text-center text-slate-800">{item.quantity}</td>
-                    <td className="px-3 py-3 font-mono text-right text-slate-600">${Number(item.unitPrice).toFixed(2)}</td>
+                    <td className="px-3 py-3 font-mono text-right text-slate-600">
+                      ${Number(item.unitPrice).toFixed(2)}
+                    </td>
                     <td className="px-3 py-3 font-mono font-bold text-right text-slate-900">
                       ${Number(item.amount).toFixed(2)}
                     </td>
                     <td className="px-3 py-3 text-slate-600">{item.billingMethod || 'Monthly'}</td>
-                    {!isReadOnly && (
-                      <td className="px-3 py-3 text-center">
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteRow(e, idx)}
-                          className="p-1 transition-colors rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 cursor-pointer"
-                          title="Delete row"
-                        >
-                          <svg className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </td>
-                    )}
+                    <td className="px-3 py-3 text-center">
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteRow(e, idx)}
+                        className="p-1 transition-colors rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 cursor-pointer"
+                        title="Delete row"
+                      >
+                        <svg className="w-4 h-4 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
               {!lineItems.length && (
                 <tr>
-                  <td colSpan={isReadOnly ? 7 : 8} className="py-10 text-center text-slate-400">
-                    No line items available.
+                  <td colSpan={8} className="py-10 text-center text-slate-400">
+                    No line items available. Use the form above to add items.
                   </td>
                 </tr>
               )}
@@ -1037,10 +1276,36 @@ export default function CustomerPOImport() {
         {/* Summary Footer */}
         {lineItems.length > 0 && (
           <div className="flex items-center justify-between px-1 pt-1 text-xs font-semibold text-slate-700">
-            <div>Total Units: <span className="text-slate-900">{totalUnits}</span></div>
-            <div>Grand Total: <span className="font-mono text-sm font-bold text-indigo-700">${grandTotal.toFixed(2)} USD</span></div>
+            <div>
+              Total Units: <span className="text-slate-900">{totalUnits}</span>
+            </div>
+            <div>
+              Grand Total:{' '}
+              <span className="font-mono text-sm font-bold text-indigo-700">
+                ${grandTotal.toFixed(2)} USD
+              </span>
+            </div>
           </div>
         )}
+      </div>
+
+      {/* Bottom Action Bar */}
+      <div className="flex items-center justify-end gap-3 pt-4">
+        <button
+          type="button"
+          onClick={() => navigate('/po')}
+          className="px-5 py-2.5 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg shadow-sm cursor-pointer transition-colors"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleSaveOrUpdate(false)}
+          className="px-6 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm cursor-pointer transition-colors"
+        >
+          {isExistingPO ? 'Save Changes' : 'Save Customer PO'}
+        </button>
       </div>
 
       {/* Mandatory Remarks & Justification Approval Modal */}
@@ -1102,7 +1367,7 @@ export default function CustomerPOImport() {
               </button>
               <button
                 type="button"
-                onClick={handleApprovalActionSubmit}
+                onClick={() => {}}
                 className={`px-4 py-2 text-xs font-bold text-white rounded-lg shadow-sm cursor-pointer ${
                   approvalModal.action === 'APPROVED'
                     ? 'bg-emerald-600 hover:bg-emerald-700'
